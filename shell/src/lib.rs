@@ -4,6 +4,8 @@
 //! The shell runs inside `sphatik-comp` (ADR 0007) so glass can read the
 //! backdrop directly. Its visual reference is `docs/design/prototype-reference.md`.
 
+pub mod gesture;
+
 /// Crate version, for diagnostics.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
