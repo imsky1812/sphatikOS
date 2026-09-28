@@ -41,7 +41,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Mesa (software EGL and GLES for golden images)
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libegl-mesa0 libgles2 libgl1-mesa-dri
       - run: cargo test --workspace
+        env:
+          SPHATIK_REQUIRE_GPU_TESTS: "1"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+      - name: Upload rendered images from failed golden tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-out
+          path: target/golden-out/
+          if-no-files-found: ignore
 
   cross:
     name: Cross-build (aarch64-unknown-linux-musl)
