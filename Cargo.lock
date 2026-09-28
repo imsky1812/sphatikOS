@@ -146,6 +146,10 @@ name = "sphatik-comp"
 version = "0.1.0"
 
 [[package]]
+name = "sphatik-motion"
+version = "0.1.0"
+
+[[package]]
 name = "sphatik-shell"
 version = "0.1.0"
 

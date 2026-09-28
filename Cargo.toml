@@ -4,6 +4,7 @@ members = [
     "compositor",
     "shell",
     "ui",
+    "ui/motion",
     "system/sphatikd",
     "tools/sp",
 ]
