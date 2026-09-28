@@ -533,21 +533,26 @@ The Terminal app, Halo Shelf, living wallpapers, Hindi for the whole phone, the 
 
 ## Conflicts with the design spec
 
-These need a decision. The rule is "prototype wins unless a doc says otherwise", so none of these changes silently.
+Decided 2026-09-28. The owner delegated the calls, and these rules come from the docs themselves:
 
-| # | Topic | Prototype | Design spec / handbook | Proposed default |
+- **Visual layout, sizes and gesture feel: prototype.** The handbook says the prototype is "the visual reference" for every component, and the Glass on laptop gate requires swipes that "feel as good as the prototype".
+- **Spring constants and which preset each transition uses: design spec.** Build plan 2.6 says the tests must match the spec values.
+- **UX rules the prototype doesn't implement: design spec.** This covers the Back gesture and thumb reach (HIG principle 2).
+- **Renderer: handbook** (GLES 3.2 first).
+
+| # | Topic | Prototype | Design spec / handbook | Decision |
 | --- | --- | --- | --- | --- |
-| C1 | Spring constants | Snappy 420/41, Smooth 210/29, Bouncy 190/18, no Gentle | Snappy 0.90 / 0.25 s, Smooth 1.0 / 0.40 s, Bouncy 0.72 / 0.45 s, Gentle 1.0 / 0.60 s; build plan 2.6 says "unit tests match the design spec values" | Spec values (the build plan explicitly overrides) |
-| C2 | Glass blur | clear 5, regular 16, thick 32, frosted 34 (CSS Gaussian σ) | Blur radius clear 8, regular 24, thick 40, frosted 64 (Kawase); tint 5 / 18 / 35 / 55%; Z 3 / 2 / 4 / 1 | Match the prototype visually; calibrate Kawase passes so the result equals the CSS Gaussian σ (golden test) |
-| C3 | Halo compact | 170 x 34 | 36 pt tall capsule | Prototype (34) |
-| C4 | Halo expanded | 369 x 188 | Up to 393 x 200 | Prototype |
-| C5 | Dock | height 94, r 36, bottom 26 | 88 pt tall, radius concentric (46 − 16 = 30) | Prototype |
-| C6 | Home icon size | 62 | 60 | Prototype |
-| C7 | App open and close spring | Smooth | Bouncy | Needs your call |
-| C8 | CC open threshold | p > 0.3 of a 0.42 H drag (about 12.6% of screen) | "past 30% of the screen height" | Prototype (it feels right in the demo) |
-| C9 | Top-edge panel zone | `y0 < 50` | Status area 54; edge zones 20 | Prototype 50 |
-| C10 | Back gesture | not implemented | Inward swipe from the left or right 20 pt edge | Add per spec (2.7) |
-| C11 | Control Center material and layout | Frosted backdrop + Regular-glass tiles; media 2 x 2; sliders 1 x 2 | One Thick sheet; media 4 x 2; sliders 1 x 3 | Prototype for Stage 2–5 |
-| C12 | App Library search | at the top | pinned at the bottom (thumb reach) | Needs your call |
-| C13 | Switcher card scale | 0.6361 | 70% | Prototype |
-| C14 | Renderer | n/a | Spec hardware table says "glass renders via Vulkan"; handbook and build plan say GLES 3.2 first | GLES (handbook, build plan) |
+| C1 | Spring constants | Snappy 420/41, Smooth 210/29, Bouncy 190/18, no Gentle | Snappy 0.90 / 0.25 s, Smooth 1.0 / 0.40 s, Bouncy 0.72 / 0.45 s, Gentle 1.0 / 0.60 s; build plan 2.6 says "unit tests match the design spec values" | **Spec.** Snappy k 631.7 c 45.2; Smooth k 246.7 c 31.4; Bouncy k 195.0 c 20.1; Gentle k 109.7 c 20.9. Keep the prototype's solver (4 substeps, 34 ms cap, rest thresholds) |
+| C2 | Glass blur | clear 5, regular 16, thick 32, frosted 34 (CSS Gaussian σ) | Blur radius clear 8, regular 24, thick 40, frosted 64 (Kawase); tint 5 / 18 / 35 / 55%; Z 3 / 2 / 4 / 1 | **Prototype look.** Choose Kawase pass count and offsets per material so the result matches a Gaussian with the prototype σ (5 / 16 / 32 / 34); verify with golden images. The spec's radii remain the names of the tiers |
+| C3 | Halo compact | 170 x 34 | 36 pt tall capsule | **Prototype** (170 x 34) |
+| C4 | Halo expanded | 369 x 188 | Up to 393 x 200 | **Prototype** (369 x 188, within the spec's maximum) |
+| C5 | Dock | height 94, r 36, bottom 26 | 88 pt tall, radius concentric (46 − 16 = 30) | **Prototype** |
+| C6 | Home icon size | 62 | 60 | **Prototype** (62) |
+| C7 | App open and close spring | Smooth | Bouncy | **Spec: Bouncy** (spring assignment is a motion-system rule) |
+| C8 | CC open threshold | p > 0.3 of a 0.42 H drag (about 12.6% of screen) | "past 30% of the screen height" | **Prototype** (gesture feel is the gate criterion) |
+| C9 | Top-edge panel zone | `y0 < 50` | Status area 54; edge zones 20 | **Prototype** (50) |
+| C10 | Back gesture | not implemented | Inward swipe from the left or right 20 pt edge | **Spec:** add in 2.7 |
+| C11 | Control Center material and layout | Frosted backdrop + Regular-glass tiles; media 2 x 2; sliders 1 x 2 | One Thick sheet; media 4 x 2; sliders 1 x 3 | **Prototype** (revisit at 5.5) |
+| C12 | App Library search | at the top | pinned at the bottom (thumb reach) | **Spec:** bottom, per HIG principle 2 "Reachable" (applies at 5.3) |
+| C13 | Switcher card scale | 0.6361 | 70% | **Prototype** |
+| C14 | Renderer | n/a | Spec hardware table says "glass renders via Vulkan"; handbook and build plan say GLES 3.2 first | **GLES 3.2** (handbook, build plan) |

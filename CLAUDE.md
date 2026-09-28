@@ -77,7 +77,7 @@ Crates required by WP 1.1: `sphatik-comp`, `sphatik-shell`, `sphatik-ui`, `sphat
 
 ## Working rules for Claude
 
-1. **Match the prototype.** If Rust and the prototype differ, the prototype wins unless a doc says otherwise. Flag conflicts to the owner (open ones: C1–C14 in `prototype-reference.md`).
+1. **Match the prototype.** If Rust and the prototype differ, the prototype wins unless a doc says otherwise. Flag new conflicts to the owner. Settled policy (C1–C14 in `prototype-reference.md`): the prototype wins for visual layout, sizes and gesture feel; the spec wins for spring constants, preset assignment and UX rules the prototype lacks; the handbook wins for the renderer (GLES).
 2. **Follow the ADRs.** Propose a new ADR (`docs/adr/0000-template.md`) before changing an architectural decision.
 3. **Per work package:** state the plan in a few lines and wait for OK → implement in small conventional commits → add tests → fmt, clippy `-D warnings`, test, fix everything → tell the owner how to see or run it → update "Current status" below.
 4. **Never run anything that flashes, erases or modifies the phone** (fastboot, dd to a device, partition tools). Give the exact command and let the owner run it. Never touch `persist`, `modem` or `efs` partitions.
@@ -116,7 +116,8 @@ Current scope agreed with the owner: **Stage 1 WPs 1.1–1.3 and Stage 2 WPs 2.1
 
 ## Environment notes
 
-- Owner's machine: Windows 11. No Rust toolchain installed yet; WSL has only `docker-desktop`. Smithay needs Linux. The build plan says to install Linux **natively** (Ubuntu 24.04 or Arch), not in a VM, so the compositor uses the real GPU. **The dev environment decision is still open.**
+- Owner's machine: Windows 11; WSL has only `docker-desktop`. Smithay needs Linux.
+- **Decision (2026-09-28):** the Stage 2 dev environment is **Ubuntu 24.04 installed natively (dual boot)**, as the build plan requires (the compositor must use the real GPU; a VM or WSL can't give valid GPU timings). Until then, WPs 1.1–1.3 are built on Windows with rustup, and CI (GitHub Actions, Ubuntu) is the Linux reference. Crates that need Linux (Smithay, libinput, DRM) must compile only on Linux targets so the workspace stays checkable on Windows.
 - GitHub: https://github.com/imsky1812/sphatikOS (`origin`, branch `main`).
 - Shells available: PowerShell and Git Bash. `pdftotext` and Python 3.11 with PyMuPDF are installed.
 
@@ -124,4 +125,4 @@ Current scope agreed with the owner: **Stage 1 WPs 1.1–1.3 and Stage 2 WPs 2.1
 
 - **Stage:** 1 (Foundations). **Next WP:** 1.1, plan not yet approved.
 - Done: Step 0 (repo on GitHub, commit `3dbcc96`); Step 1 (all docs and the prototype read); Step 2 (this file + `docs/design/prototype-reference.md`).
-- Open decisions for the owner: dev environment (native Linux, WSL2 or other); conflicts C1 (springs), C7 (app-open spring), C12 (App Library search position); the rest have proposed defaults.
+- Decided: conflicts C1–C14 (see `prototype-reference.md`), dev environment (native Ubuntu 24.04 dual boot for Stage 2).
