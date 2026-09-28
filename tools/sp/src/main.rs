@@ -5,6 +5,7 @@
 
 mod build;
 mod cli;
+mod flash;
 
 use std::process::ExitCode;
 
@@ -19,10 +20,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Command::Build(args) => build::run(&args),
-        Command::Flash(_) => {
-            eprintln!("sp: not implemented yet");
-            ExitCode::from(EXIT_UNAVAILABLE)
-        }
+        Command::Flash(args) => flash::run(&args),
         Command::Logs(_) => {
             eprintln!(
                 "sp logs: needs SSH over USB to the phone, which arrives in WP 1.7. Not available yet."
