@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "compositor",
+    "shell",
+    "ui",
+    "system/sphatikd",
+    "tools/sp",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/imsky1812/sphatikOS"
+authors = ["The Sphatik OS Authors"]
+
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# CONTRIBUTING.md: no `unsafe` without a `// SAFETY:` comment.
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,11 @@
+[package]
+name = "sphatik-shell"
+description = "Sphatik OS system shell: lock screen, home, panels, Halo, switcher, Intent Bar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
