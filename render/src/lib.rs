@@ -10,6 +10,7 @@
 //! All coordinates are logical points; the renderer scales them to pixels.
 
 mod damage;
+pub mod demo;
 mod geom;
 mod paint;
 mod renderer;

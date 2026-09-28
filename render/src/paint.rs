@@ -189,6 +189,26 @@ pub enum Paint {
     },
 }
 
+impl Paint {
+    /// A CSS `linear-gradient(<angle>deg, …)` over `rect`: 0° points up,
+    /// 90° right, 180° down, and the gradient line is long enough for the
+    /// corners to reach the first and last stops, exactly as CSS defines it.
+    /// Coordinates are in points (the frame is the unit square at the
+    /// origin), so the colour bands stay perpendicular to the angle.
+    pub fn css_linear(rect: Rect, angle_deg: f32, stops: Stops) -> Paint {
+        let a = angle_deg.to_radians();
+        let (dx, dy) = (a.sin(), -a.cos());
+        let half = 0.5 * (rect.w * dx.abs() + rect.h * dy.abs());
+        let (cx, cy) = (rect.x + 0.5 * rect.w, rect.y + 0.5 * rect.h);
+        Paint::Linear {
+            frame: Rect::new(0.0, 0.0, 1.0, 1.0),
+            from: [cx - dx * half, cy - dy * half],
+            to: [cx + dx * half, cy + dy * half],
+            stops,
+        }
+    }
+}
+
 /// One rounded rectangle to draw.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shape {
@@ -255,6 +275,34 @@ mod tests {
         // keeps the colour white while it fades.
         assert_eq!(Stops::svg(&stops).sample(0.5).r, 0.5);
         assert_eq!(Stops::css(&stops).sample(0.5).r, 1.0);
+    }
+
+    #[test]
+    fn css_angles_follow_the_css_gradient_line() {
+        let r = Rect::new(0.0, 0.0, 100.0, 50.0);
+        let stops = Stops::css(&[(0.0, Color::WHITE), (1.0, Color::TRANSPARENT)]);
+        let ends = |angle: f32| match Paint::css_linear(r, angle, stops) {
+            Paint::Linear { from, to, .. } => (from, to),
+            other => panic!("unexpected {other:?}"),
+        };
+        let close =
+            |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4;
+        // 180deg: top to bottom through the centre.
+        let (f, t) = ends(180.0);
+        assert!(
+            close(f, [50.0, 0.0]) && close(t, [50.0, 50.0]),
+            "{f:?} {t:?}"
+        );
+        // 90deg: left to right.
+        let (f, t) = ends(90.0);
+        assert!(
+            close(f, [0.0, 25.0]) && close(t, [100.0, 25.0]),
+            "{f:?} {t:?}"
+        );
+        // 135deg on a 100 x 50 box: length = (100 + 50) * sin 45.
+        let (f, t) = ends(135.0);
+        let len = ((t[0] - f[0]).powi(2) + (t[1] - f[1]).powi(2)).sqrt();
+        assert!((len - 150.0 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3);
     }
 
     #[test]
