@@ -54,7 +54,8 @@ device/xiaomi-curtana/   kernel.config fragment, firmware list, UCM, STATUS.md
 system/init/     sphatik-init            system/sphatikd/  sphatikd
 compositor/      sphatik-comp + glass renderer
 shell/           sphatik-shell: boot, lockscreen, home, library, panels, halo, switcher, intent
-ui/              sphatik-ui toolkit      apps/  one crate per app
+ui/              sphatik-ui toolkit      ui/motion/  sphatik-motion spring engine
+apps/            one crate per app
 sdk/             SDK crates, spk packager, templates
 android/         container image recipe, sphatik-bridge APK
 image/           system image, initramfs, A/B layout
@@ -123,7 +124,8 @@ Current scope agreed with the owner: **Stage 1 WPs 1.1–1.3 and Stage 2 WPs 2.1
 
 ## Current status
 
-- **Stage:** 1 (Foundations): agreed scope 1.1–1.3 done (1.4–1.7 are device work for the owner). **Next:** Stage 2. WP 2.1 needs native Ubuntu 24.04; proposed next is 2.6 (spring engine), which is platform-independent, while the owner sets up Ubuntu. Plan not yet approved.
+- **Stage:** 2 (Graphics core on the laptop). Stage 1's agreed scope (1.1–1.3) is done; 1.4–1.7 are device work for the owner. **WP 2.1 needs native Ubuntu 24.04** (owner is setting it up). Next: another platform-independent WP (2.3 wallpaper geometry, or 2.7's recogniser logic) or 2.1 once Ubuntu is ready. Plan not yet approved.
+- **WP 2.6 done** (PR #3): crate `sphatik-motion` at `ui/motion/`, re-exported as `sphatik_ui::motion`. `SpringConfig` (k, c; `from_response(damping_ratio, response)`), `Preset::{Snappy, Smooth, Bouncy, Gentle}` with the spec values (C1), `Spring` (`new`, `animate_to`, `set_velocity`, `set_config`, `jump_to`, `step(dt)`, accessors), `progress_velocity(pt_per_ms, travel)`, constants `MAX_FRAME_DT` 0.034, `REST_VELOCITY` 0.02, `REST_DISTANCE` 0.002. `step` uses the exact closed-form solution (not the prototype's Euler substeps, see C1), so motion is the same at 60 and 120 Hz. All `Copy`, no allocation. 18 unit tests against an independent RK4 reference + 1 doc test.
 - Done: Step 0 (repo on GitHub, commit `3dbcc96`); Step 1 (all docs and the prototype read); Step 2 (this file + `docs/design/prototype-reference.md`).
 - **WP 1.1 done** (`36f7853`): Cargo workspace (resolver 2, edition 2021, Apache-2.0) with `sphatik-comp` (bin, `compositor/`), `sphatik-shell` (lib, `shell/`), `sphatik-ui` (lib, `ui/`), `sphatikd` (bin, `system/sphatikd/`, denies unwrap/expect/panic outside tests), `sp` (bin, `tools/sp/`). Workspace lints: `missing_docs` warn, `clippy::undocumented_unsafe_blocks` deny. `rust-toolchain.toml` pins stable + clippy + rustfmt; `rustfmt.toml` forces LF; `.gitattributes` normalises to LF. fmt, clippy `-D warnings` and 5 smoke tests pass.
 - **WP 1.2 done** (PR #1, `36e2667`): `.github/workflows/ci.yml` on ubuntu-24.04 for every PR and push to `main`: Format, Clippy (`-D warnings`), Test, and a Cross-build (`cargo zigbuild --workspace --release --target aarch64-unknown-linux-musl`, `file` check, artifact `sphatik-aarch64-musl`). The PR flow: branch → PR with the template → wait for green → merge (squash).

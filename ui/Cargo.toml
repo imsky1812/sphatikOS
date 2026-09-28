@@ -9,3 +9,6 @@ authors.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+sphatik-motion = { version = "0.1.0", path = "motion" }

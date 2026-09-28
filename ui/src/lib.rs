@@ -4,6 +4,9 @@
 //! Reactive state, taffy layout, cosmic-text, the shared spring engine and
 //! the design tokens will live here (handbook, "UI toolkit and shell").
 
+/// The shared spring engine (presets, springs, velocity hand-off).
+pub use sphatik_motion as motion;
+
 /// Crate version, for diagnostics.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

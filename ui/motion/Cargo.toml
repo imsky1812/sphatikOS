@@ -1,0 +1,11 @@
+[package]
+name = "sphatik-motion"
+description = "Sphatik OS spring engine: the four motion presets, interruptible springs and velocity hand-off"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
