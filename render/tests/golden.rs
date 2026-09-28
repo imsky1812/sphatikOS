@@ -53,6 +53,10 @@ impl Headless {
             .choose_first_config(
                 display,
                 &[
+                    // The default is window-capable configs, which a
+                    // surfaceless display has none of.
+                    egl::SURFACE_TYPE,
+                    egl::PBUFFER_BIT,
                     egl::RENDERABLE_TYPE,
                     egl::OPENGL_ES3_BIT,
                     egl::RED_SIZE,
