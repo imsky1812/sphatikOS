@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "compositor",
+    "render",
     "shell",
     "ui",
     "ui/motion",

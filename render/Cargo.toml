@@ -1,0 +1,11 @@
+[package]
+name = "sphatik-render"
+description = "Sphatik OS GPU renderer: GLES 3 shapes, gradients, wallpapers and glass (ADR 0008)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
