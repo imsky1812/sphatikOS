@@ -12,7 +12,11 @@
 mod damage;
 mod geom;
 mod paint;
+mod renderer;
+mod shaders;
 
 pub use damage::Damage;
 pub use geom::Rect;
+pub use glow;
 pub use paint::{Color, Paint, Shape, Stops, MAX_STOPS};
+pub use renderer::{FrameStats, RenderError, Renderer};
