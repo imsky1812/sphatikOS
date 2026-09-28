@@ -123,6 +123,8 @@ Current scope agreed with the owner: **Stage 1 WPs 1.1–1.3 and Stage 2 WPs 2.1
 
 ## Current status
 
-- **Stage:** 1 (Foundations). **Next WP:** 1.1, plan not yet approved.
+- **Stage:** 1 (Foundations). **Next WP:** 1.2 (CI), plan not yet approved.
 - Done: Step 0 (repo on GitHub, commit `3dbcc96`); Step 1 (all docs and the prototype read); Step 2 (this file + `docs/design/prototype-reference.md`).
+- **WP 1.1 done** (`36f7853`): Cargo workspace (resolver 2, edition 2021, Apache-2.0) with `sphatik-comp` (bin, `compositor/`), `sphatik-shell` (lib, `shell/`), `sphatik-ui` (lib, `ui/`), `sphatikd` (bin, `system/sphatikd/`, denies unwrap/expect/panic outside tests), `sp` (bin, `tools/sp/`). Workspace lints: `missing_docs` warn, `clippy::undocumented_unsafe_blocks` deny. `rust-toolchain.toml` pins stable + clippy + rustfmt; `rustfmt.toml` forces LF; `.gitattributes` normalises to LF. fmt, clippy `-D warnings` and 5 smoke tests pass.
+- Local toolchain: Windows, rustup stable `x86_64-pc-windows-gnu` (Rust 1.98.1), installed in `%USERPROFILE%\.cargo` (on the user PATH). In Git Bash, run `export PATH="$HOME/.cargo/bin:$PATH"` if `cargo` isn't found.
 - Decided: conflicts C1–C14 (see `prototype-reference.md`), dev environment (native Ubuntu 24.04 dual boot for Stage 2).
