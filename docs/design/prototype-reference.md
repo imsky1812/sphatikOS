@@ -548,10 +548,10 @@ Decided 2026-09-28. The owner delegated the calls, and these rules come from the
 | C4 | Halo expanded | 369 x 188 | Up to 393 x 200 | **Prototype** (369 x 188, within the spec's maximum) |
 | C5 | Dock | height 94, r 36, bottom 26 | 88 pt tall, radius concentric (46 − 16 = 30) | **Prototype** |
 | C6 | Home icon size | 62 | 60 | **Prototype** (62) |
-| C7 | App open and close spring | Smooth | Bouncy | **Spec: Bouncy** (spring assignment is a motion-system rule) |
+| C7 | App open and close spring | Smooth | Bouncy | **Spec: Bouncy** (spring assignment is a motion-system rule). By the same rule, **unlock** commits with Bouncy (spec lock-screen states: "Swipe up; Bouncy spring"); falling back to locked stays Smooth. Panels keep the prototype's Bouncy open and Smooth close (the spec assigns them no preset) |
 | C8 | CC open threshold | p > 0.3 of a 0.42 H drag (about 12.6% of screen) | "past 30% of the screen height" | **Prototype** (gesture feel is the gate criterion) |
 | C9 | Top-edge panel zone | `y0 < 50` | Status area 54; edge zones 20 | **Prototype** (50) |
-| C10 | Back gesture | not implemented | Inward swipe from the left or right 20 pt edge | **Spec:** add in 2.7 |
+| C10 | Back gesture | not implemented | Inward swipe from the left or right 20 pt edge | **Spec:** added in 2.7 (`sphatik_shell::gesture`): only inside an app with no panel open, horizontal, moving inward. The spec gives no commit rule, so these are **provisional**: progress = \|dx\| / (0.5 W); commit when progress > 0.35 or \|vx\| > 0.35 pt/ms |
 | C11 | Control Center material and layout | Frosted backdrop + Regular-glass tiles; media 2 x 2; sliders 1 x 2 | One Thick sheet; media 4 x 2; sliders 1 x 3 | **Prototype** (revisit at 5.5) |
 | C12 | App Library search | at the top | pinned at the bottom (thumb reach) | **Spec:** bottom, per HIG principle 2 "Reachable" (applies at 5.3) |
 | C13 | Switcher card scale | 0.6361 | 70% | **Prototype** |
