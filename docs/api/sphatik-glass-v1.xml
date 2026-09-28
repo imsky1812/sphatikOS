@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="sphatik_glass_v1">
+  <copyright>
+    Copyright 2026 The Sphatik OS Authors
+    SPDX-License-Identifier: Apache-2.0
+  </copyright>
+
+  <description summary="request compositor-rendered glass behind surface regions">
+    Lets a client ask the compositor to draw Sphatik glass (blur, refraction,
+    tint, rim light) behind rounded rectangles of a surface. The client draws
+    its own content on top with transparent pixels where the glass should show.
+    The compositor may degrade or drop effects to meet its frame budget.
+  </description>
+
+  <interface name="sphatik_glass_manager_v1" version="1">
+    <description summary="glass factory">
+      Global advertised by the compositor.
+    </description>
+
+    <request name="destroy" type="destructor"/>
+
+    <request name="get_glass">
+      <description summary="create a glass object for a surface">
+        At most one sphatik_glass_v1 per wl_surface; a second request is a
+        protocol error.
+      </description>
+      <arg name="id" type="new_id" interface="sphatik_glass_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+
+    <enum name="error">
+      <entry name="already_has_glass" value="0" summary="surface already has a glass object"/>
+    </enum>
+  </interface>
+
+  <interface name="sphatik_glass_v1" version="1">
+    <description summary="glass regions for one surface">
+      State is double-buffered and applied on the next wl_surface.commit.
+    </description>
+
+    <enum name="material">
+      <entry name="clear" value="0" summary="light blur, strong refraction"/>
+      <entry name="regular" value="1" summary="default panels and bars"/>
+      <entry name="thick" value="2" summary="sheets, menus, keyboard"/>
+      <entry name="frosted" value="3" summary="heavy blur backdrops"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="remove all glass from the surface"/>
+    </request>
+
+    <request name="clear_regions">
+      <description summary="remove all pending regions"/>
+    </request>
+
+    <request name="add_region">
+      <description summary="add a rounded rectangle of glass">
+        Coordinates are in surface-local logical pixels. Regions may not
+        overlap; overlapping regions are merged by the compositor.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="corner_radius" type="uint" summary="continuous-curvature radius"/>
+      <arg name="material" type="uint" enum="material"/>
+    </request>
+
+    <request name="set_tint">
+      <description summary="override the adaptive tint for all regions">
+        Colour as premultiplied RGBA, 8 bits per channel packed into a uint.
+        Zero restores the adaptive tint.
+      </description>
+      <arg name="rgba" type="uint"/>
+    </request>
+
+    <event name="tier">
+      <description summary="current rendering tier">
+        Sent on creation and whenever the tier changes, so the client can
+        adjust its own contrast.
+      </description>
+      <arg name="tier" type="uint" enum="tier"/>
+    </event>
+
+    <enum name="tier">
+      <entry name="liquid" value="0"/>
+      <entry name="balanced" value="1"/>
+      <entry name="low" value="2" summary="solid tint only (Reduce Transparency or budget exceeded)"/>
+    </enum>
+  </interface>
+</protocol>
