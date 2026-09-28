@@ -1,23 +1,31 @@
 //! `sp`: the Sphatik OS developer tool.
 //!
-//! One command for every build, flash and debug task. The command-line
-//! skeleton (`build`, `logs`, `flash`) arrives in WP 1.3.
+//! One command for every build, flash and debug task (handbook, "Repository
+//! layout and build environment").
 
-/// One-line identification printed at start-up.
-fn banner() -> String {
-    format!("sp {}", env!("CARGO_PKG_VERSION"))
-}
+mod cli;
 
-fn main() {
-    println!("{}", banner());
-}
+use std::process::ExitCode;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+use clap::Parser;
 
-    #[test]
-    fn banner_names_the_binary_and_version() {
-        assert_eq!(banner(), format!("sp {}", env!("CARGO_PKG_VERSION")));
+use cli::{Cli, Command};
+
+/// Exit code for commands that exist but are not available yet.
+const EXIT_UNAVAILABLE: u8 = 2;
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Build(_) | Command::Flash(_) => {
+            eprintln!("sp: not implemented yet");
+            ExitCode::from(EXIT_UNAVAILABLE)
+        }
+        Command::Logs(_) => {
+            eprintln!(
+                "sp logs: needs SSH over USB to the phone, which arrives in WP 1.7. Not available yet."
+            );
+            ExitCode::from(EXIT_UNAVAILABLE)
+        }
     }
 }
