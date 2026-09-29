@@ -1,0 +1,18 @@
+[package]
+name = "sphatik-render"
+description = "Sphatik OS GPU renderer: GLES 3 shapes, gradients, wallpapers and glass (ADR 0008)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+glow = "0.18.0"
+
+[dev-dependencies]
+khronos-egl = { version = "6.0.0", features = ["dynamic"] }
+png = "0.18"

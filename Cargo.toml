@@ -2,10 +2,12 @@
 resolver = "2"
 members = [
     "compositor",
+    "render",
     "shell",
     "ui",
     "ui/motion",
     "system/sphatikd",
+    "tools/preview",
     "tools/sp",
 ]
 

@@ -1,0 +1,22 @@
+[package]
+name = "sphatik-preview"
+description = "Desktop window that runs the Sphatik shell and renderer on Windows, macOS or Linux (ADR 0008)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+glutin = "0.32"
+glutin-winit = "0.5"
+png = "0.18"
+raw-window-handle = "0.6"
+sphatik-render = { version = "0.1.0", path = "../../render" }
+sphatik-shell = { version = "0.1.0", path = "../../shell" }
+winit = "0.30"
