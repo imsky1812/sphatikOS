@@ -26,4 +26,4 @@
   <path transform="translate(268 420) scale(0.9)" opacity="0.9" fill="#fff" d="M0-6 1.1-1.1 6 0 1.1 1.1 0 6-1.1 1.1-6 0-1.1-1.1Z"/><path transform="translate(142 440) scale(0.6)" opacity="0.7" fill="#fff" d="M0-6 1.1-1.1 6 0 1.1 1.1 0 6-1.1 1.1-6 0-1.1-1.1Z"/><path transform="translate(306 352) scale(0.5)" opacity="0.7" fill="#fff" d="M0-6 1.1-1.1 6 0 1.1 1.1 0 6-1.1 1.1-6 0-1.1-1.1Z"/><path transform="translate(70 150) scale(0.45)" opacity="0.5" fill="#fff" d="M0-6 1.1-1.1 6 0 1.1 1.1 0 6-1.1 1.1-6 0-1.1-1.1Z"/><path transform="translate(330 250) scale(0.35)" opacity="0.45" fill="#fff" d="M0-6 1.1-1.1 6 0 1.1 1.1 0 6-1.1 1.1-6 0-1.1-1.1Z"/><path transform="translate(212 690) scale(0.7)" opacity="0.8" fill="#fff" d="M0-6 1.1-1.1 6 0 1.1 1.1 0 6-1.1 1.1-6 0-1.1-1.1Z"/>
   <ellipse id="bglow" cx="205" cy="440" rx="70" ry="150" fill="#fff" opacity=".22" style="mix-blend-mode:screen"/></g>
   <rect id="wtint" width="393" height="852" opacity="0"/>
-  <rect width="393" height="852" filter="url(#grain)" opacity=".06" style="mix-blend-mode:overlay"/></svg>
+  </svg>

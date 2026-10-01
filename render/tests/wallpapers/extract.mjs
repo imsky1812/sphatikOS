@@ -21,9 +21,16 @@ const code = html.slice(start, end);
 const { WALLS, wallMarkup } = new Function(`${code}\nreturn { WALLS, wallMarkup };`)();
 
 for (const key of Object.keys(WALLS)) {
+  // Drop the procedural grain overlay (feTurbulence): its noise is
+  // implementation-defined and cannot match a GPU render bit-for-bit, so the
+  // Rust engine renders grain-free and the golden references do too.
+  const body = wallMarkup(key, "", true).replace(
+    /<rect[^>]*filter="url\(#grain\)"[^>]*\/>/g,
+    "",
+  );
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 393 852" width="393" height="852">` +
-    wallMarkup(key, "", true) +
+    body +
     `</svg>\n`;
   const out = join(here, `${key}.svg`);
   writeFileSync(out, svg);
