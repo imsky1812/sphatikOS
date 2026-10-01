@@ -15,6 +15,7 @@ mod geom;
 mod paint;
 mod renderer;
 mod shaders;
+pub mod vector;
 
 pub use damage::Damage;
 pub use geom::Rect;
