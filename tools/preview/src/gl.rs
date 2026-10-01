@@ -100,4 +100,14 @@ impl GlWindowState {
     pub fn swap(&self) -> Result<(), glutin::error::Error> {
         self.surface.swap_buffers(&self.context)
     }
+
+    /// Builds another `glow` handle to the same GL context, so a second
+    /// renderer can share it. Both run on this thread with the context
+    /// current, so sharing is sound.
+    pub fn make_glow(&self) -> glow::Context {
+        let display = self.context.display();
+        // SAFETY: the context is current on this thread; the loader returns
+        // its function pointers, and the display outlives the returned handle.
+        unsafe { glow::Context::from_loader_function_cstr(|name| display.get_proc_address(name)) }
+    }
 }

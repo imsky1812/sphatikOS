@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use sphatik_render::wallpaper::Wall;
-use sphatik_render::WallpaperRenderer;
+use sphatik_render::{GlassPanel, GlassRenderer, Rect, WallpaperRenderer};
 use sphatik_shell::gesture::{self, Canvas, Hit, Point, ShellContext, TouchTracker};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -49,17 +49,22 @@ struct Options {
 /// The canvas the preview shows: the prototype's 393 x 852 pt screen.
 const CANVAS: Canvas = Canvas::PROTOTYPE;
 
+/// A Regular-glass panel at the first home-widget position (reference §9).
+fn demo_panel() -> GlassPanel {
+    GlassPanel::regular(Rect::new(18.0, 66.0, 171.5, 162.0), 30.0)
+}
+
 fn wall_from_name(name: &str) -> Option<Wall> {
     Wall::ALL.into_iter().find(|w| w.key() == name)
 }
 
 struct App {
     options: Options,
-    state: Option<(gl::GlWindowState, WallpaperRenderer)>,
+    state: Option<(gl::GlWindowState, WallpaperRenderer, GlassRenderer)>,
     wall: Wall,
+    glass_on: bool,
     dirty: bool,
     frames_drawn: u64,
-    last_frame_ms: f64,
     started: Instant,
     touch: Option<TouchTracker>,
     cursor: Point,
@@ -73,9 +78,9 @@ impl App {
             options,
             state: None,
             wall,
+            glass_on: true,
             dirty: true,
             frames_drawn: 0,
-            last_frame_ms: 0.0,
             started: Instant::now(),
             touch: None,
             cursor: Point::default(),
@@ -108,49 +113,68 @@ impl App {
             .with_resizable(true)
             .with_visible(!screenshot);
         let (window_state, glow_ctx) = gl::create(event_loop, attributes)?;
-        let renderer = WallpaperRenderer::new(glow_ctx)?;
-        self.state = Some((window_state, renderer));
-        self.render_wallpaper()?;
+        let glass = GlassRenderer::new(window_state.make_glow())?;
+        let wallpaper = WallpaperRenderer::new(glow_ctx)?;
+        self.state = Some((window_state, wallpaper, glass));
+        self.render_frame()?;
         Ok(())
     }
 
-    /// (Re)renders the current wallpaper into its texture at the window size.
-    fn render_wallpaper(&mut self) -> Result<(), Box<dyn Error>> {
-        let Some((window_state, renderer)) = self.state.as_mut() else {
+    /// (Re)renders the wallpaper, and the glass panel over it, at the window
+    /// size (or the screenshot size).
+    fn render_frame(&mut self) -> Result<(), Box<dyn Error>> {
+        let glass_on = self.glass_on;
+        let wall = self.wall;
+        let (w, h) = self.target_size();
+        let Some((_, wallpaper, glass)) = self.state.as_mut() else {
             return Ok(());
         };
-        let (w, h) = if self.options.screenshot.is_some() {
+        wallpaper.render(&wall.build(), CANVAS.width, CANVAS.height, w, h)?;
+        if glass_on {
+            let texture = wallpaper.texture().ok_or("no wallpaper texture")?;
+            let panels = [demo_panel()];
+            glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
+        }
+        self.dirty = true;
+        Ok(())
+    }
+
+    fn target_size(&self) -> (u32, u32) {
+        if self.options.screenshot.is_some() {
             let s = self.options.scale.clamp(0.25, 8.0);
             (
                 (CANVAS.width * s).round() as u32,
                 (CANVAS.height * s).round() as u32,
             )
-        } else {
+        } else if let Some((window_state, _, _)) = self.state.as_ref() {
             let size = window_state.window.inner_size();
             (size.width.max(1), size.height.max(1))
-        };
-        renderer.render(&self.wall.build(), CANVAS.width, CANVAS.height, w, h)?;
-        self.dirty = true;
-        Ok(())
+        } else {
+            (CANVAS.width as u32, CANVAS.height as u32)
+        }
     }
 
     fn redraw(&mut self) -> Result<(), Box<dyn Error>> {
-        let Some((window_state, renderer)) = self.state.as_mut() else {
-            return Ok(());
-        };
         if !self.dirty {
             return Ok(());
         }
-        let started = Instant::now();
+        let glass_on = self.glass_on;
+        let Some((window_state, wallpaper, glass)) = self.state.as_mut() else {
+            return Ok(());
+        };
         let size = window_state.window.inner_size();
-        renderer.present(size.width, size.height);
+        if glass_on {
+            glass.present(size.width, size.height);
+        } else {
+            wallpaper.present(size.width, size.height);
+        }
         window_state.swap()?;
         self.dirty = false;
         self.frames_drawn += 1;
-        self.last_frame_ms = started.elapsed().as_secs_f64() * 1000.0;
         window_state.window.set_title(&format!(
-            "Sphatik preview · {} · frames drawn: {}",
+            "Sphatik preview · {} · glass {} · frames drawn: {}",
             self.wall.key(),
+            if glass_on { "on" } else { "off" },
             self.frames_drawn
         ));
         Ok(())
@@ -162,9 +186,19 @@ impl App {
             .screenshot
             .clone()
             .ok_or("no screenshot path")?;
-        let (_, renderer) = self.state.as_ref().ok_or("no renderer")?;
-        let (w, h) = renderer.size().ok_or("no wallpaper rendered")?;
-        let pixels = renderer.read_pixels().ok_or("could not read pixels")?;
+        let glass_on = self.glass_on;
+        let (_, wallpaper, glass) = self.state.as_ref().ok_or("no renderer")?;
+        let (w, h, pixels) = if glass_on {
+            let (w, h) = glass.size().ok_or("no glass rendered")?;
+            (w, h, glass.read_pixels().ok_or("could not read pixels")?)
+        } else {
+            let (w, h) = wallpaper.size().ok_or("no wallpaper rendered")?;
+            (
+                w,
+                h,
+                wallpaper.read_pixels().ok_or("could not read pixels")?,
+            )
+        };
         write_png(&path, w, h, &pixels)?;
         Ok(path)
     }
@@ -174,10 +208,10 @@ impl App {
             return;
         }
         self.wall = wall;
-        if let Err(e) = self.render_wallpaper() {
+        if let Err(e) = self.render_frame() {
             eprintln!("sphatik-preview: {e}");
         }
-        if let Some((s, _)) = self.state.as_ref() {
+        if let Some((s, _, _)) = self.state.as_ref() {
             s.window.request_redraw();
         }
     }
@@ -232,7 +266,7 @@ impl ApplicationHandler for App {
             event_loop.exit();
             return;
         }
-        if let Some((s, _)) = self.state.as_ref() {
+        if let Some((s, _, _)) = self.state.as_ref() {
             s.window.request_redraw();
         }
     }
@@ -241,14 +275,14 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(PhysicalSize { width, height }) => {
-                if let Some((s, _)) = self.state.as_ref() {
+                if let Some((s, _, _)) = self.state.as_ref() {
                     s.resize(width, height);
                 }
-                if let Err(e) = self.render_wallpaper() {
+                if let Err(e) = self.render_frame() {
                     self.fail(event_loop, format!("resize failed: {e}"));
                     return;
                 }
-                if let Some((s, _)) = self.state.as_ref() {
+                if let Some((s, _, _)) = self.state.as_ref() {
                     s.window.request_redraw();
                 }
             }
@@ -271,6 +305,16 @@ impl ApplicationHandler for App {
                     KeyCode::Digit2 => Some(Wall::Obsidian),
                     KeyCode::Digit3 => Some(Wall::Dawn),
                     KeyCode::Digit4 => Some(Wall::Night),
+                    KeyCode::KeyG => {
+                        self.glass_on = !self.glass_on;
+                        if let Err(e) = self.render_frame() {
+                            eprintln!("sphatik-preview: {e}");
+                        }
+                        if let Some((s, _, _)) = self.state.as_ref() {
+                            s.window.request_redraw();
+                        }
+                        None
+                    }
                     KeyCode::Escape => {
                         event_loop.exit();
                         None
@@ -282,7 +326,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                if let Some((s, _)) = self.state.as_ref() {
+                if let Some((s, _, _)) = self.state.as_ref() {
                     let size = s.window.inner_size();
                     let per_point = size.width.max(1) as f64 / f64::from(CANVAS.width);
                     self.cursor = Point::new(
@@ -344,8 +388,9 @@ fn main() -> ExitCode {
         eprintln!("sphatik-preview: {e}");
         return ExitCode::FAILURE;
     }
-    if let Some((s, renderer)) = app.state.take() {
-        renderer.destroy();
+    if let Some((s, wallpaper, glass)) = app.state.take() {
+        glass.destroy();
+        wallpaper.destroy();
         drop(s);
     }
     match app.result {
