@@ -1,14 +1,15 @@
-//! `sphatik-preview`: runs the Sphatik shell and renderer in a desktop
-//! window, so the UI can be seen and felt on Windows (ADR 0008).
+//! `sphatik-preview`: runs the Sphatik renderer in a desktop window, so the
+//! UI can be seen and felt on Windows (ADR 0008).
 //!
 //! ```text
-//! cargo run -p sphatik-preview                              # open the window
-//! cargo run -p sphatik-preview -- --screenshot out.png      # save one frame
+//! cargo run -p sphatik-preview                                 # open the window
+//! cargo run -p sphatik-preview -- --wallpaper obsidian         # pick a wallpaper
+//! cargo run -p sphatik-preview -- --screenshot out.png         # save one frame
 //! ```
 //!
-//! The mouse acts as a finger. Frames are drawn only when something changed;
-//! the title bar counts drawn frames so an idle window can be seen to cost
-//! nothing.
+//! Keys 1–4 switch between Liquid Aurora, Obsidian, Quartz Dawn and Amethyst.
+//! The mouse acts as a finger: each drag is classified and logged. Frames are
+//! drawn only when something changes; the title bar counts drawn frames.
 
 mod gl;
 
@@ -20,18 +21,23 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::Parser;
-use sphatik_render::{demo, Damage, Rect, Renderer, Shape};
+use sphatik_render::wallpaper::Wall;
+use sphatik_render::WallpaperRenderer;
 use sphatik_shell::gesture::{self, Canvas, Hit, Point, ShellContext, TouchTracker};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 /// Command-line options.
 #[derive(Debug, Parser)]
 #[command(name = "sphatik-preview", version, about)]
 struct Options {
+    /// Which wallpaper to show: aurora, obsidian, dawn or night.
+    #[arg(long, default_value = "aurora")]
+    wallpaper: String,
     /// Render one frame to this PNG file and exit.
     #[arg(long, value_name = "PNG")]
     screenshot: Option<PathBuf>,
@@ -43,11 +49,15 @@ struct Options {
 /// The canvas the preview shows: the prototype's 393 x 852 pt screen.
 const CANVAS: Canvas = Canvas::PROTOTYPE;
 
+fn wall_from_name(name: &str) -> Option<Wall> {
+    Wall::ALL.into_iter().find(|w| w.key() == name)
+}
+
 struct App {
     options: Options,
-    state: Option<(gl::GlWindowState, Renderer)>,
-    shapes: [Shape; 2],
-    damage: Damage,
+    state: Option<(gl::GlWindowState, WallpaperRenderer)>,
+    wall: Wall,
+    dirty: bool,
     frames_drawn: u64,
     last_frame_ms: f64,
     started: Instant,
@@ -58,11 +68,12 @@ struct App {
 
 impl App {
     fn new(options: Options) -> Self {
+        let wall = wall_from_name(&options.wallpaper).unwrap_or(Wall::Aurora);
         Self {
             options,
             state: None,
-            shapes: demo::backdrop_with_panel(canvas_rect()),
-            damage: Damage::new(),
+            wall,
+            dirty: true,
             frames_drawn: 0,
             last_frame_ms: 0.0,
             started: Instant::now(),
@@ -81,7 +92,6 @@ impl App {
         event_loop.exit();
     }
 
-    /// Opens the window and GL context; sizes the render target.
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         let screenshot = self.options.screenshot.is_some();
         let zoom = if screenshot {
@@ -98,33 +108,29 @@ impl App {
             .with_resizable(true)
             .with_visible(!screenshot);
         let (window_state, glow_ctx) = gl::create(event_loop, attributes)?;
-        let renderer = Renderer::new(glow_ctx)?;
+        let renderer = WallpaperRenderer::new(glow_ctx)?;
         self.state = Some((window_state, renderer));
-        if screenshot {
-            let (w, h) = self.screenshot_size();
-            self.resize_target(w, h)?;
-        } else {
-            let size = self.state.as_ref().map(|(s, _)| s.window.inner_size());
-            if let Some(size) = size {
-                self.resize_target(size.width, size.height)?;
-            }
-        }
+        self.render_wallpaper()?;
         Ok(())
     }
 
-    fn screenshot_size(&self) -> (u32, u32) {
-        let s = self.options.scale.clamp(0.25, 8.0);
-        (
-            (CANVAS.width * s).round() as u32,
-            (CANVAS.height * s).round() as u32,
-        )
-    }
-
-    fn resize_target(&mut self, width: u32, height: u32) -> Result<(), Box<dyn Error>> {
-        if let Some((_, renderer)) = self.state.as_mut() {
-            renderer.resize(CANVAS.width, CANVAS.height, width.max(1), height.max(1))?;
-            self.damage.add_all(canvas_rect());
-        }
+    /// (Re)renders the current wallpaper into its texture at the window size.
+    fn render_wallpaper(&mut self) -> Result<(), Box<dyn Error>> {
+        let Some((window_state, renderer)) = self.state.as_mut() else {
+            return Ok(());
+        };
+        let (w, h) = if self.options.screenshot.is_some() {
+            let s = self.options.scale.clamp(0.25, 8.0);
+            (
+                (CANVAS.width * s).round() as u32,
+                (CANVAS.height * s).round() as u32,
+            )
+        } else {
+            let size = window_state.window.inner_size();
+            (size.width.max(1), size.height.max(1))
+        };
+        renderer.render(&self.wall.build(), CANVAS.width, CANVAS.height, w, h)?;
+        self.dirty = true;
         Ok(())
     }
 
@@ -132,19 +138,20 @@ impl App {
         let Some((window_state, renderer)) = self.state.as_mut() else {
             return Ok(());
         };
-        let started = Instant::now();
-        let stats = renderer.render(&self.shapes, self.damage.take(), demo::CLEAR);
-        if !stats.drawn {
+        if !self.dirty {
             return Ok(());
         }
+        let started = Instant::now();
         let size = window_state.window.inner_size();
         renderer.present(size.width, size.height);
         window_state.swap()?;
+        self.dirty = false;
         self.frames_drawn += 1;
         self.last_frame_ms = started.elapsed().as_secs_f64() * 1000.0;
         window_state.window.set_title(&format!(
-            "Sphatik preview · frames drawn: {} · last frame {:.2} ms CPU",
-            self.frames_drawn, self.last_frame_ms
+            "Sphatik preview · {} · frames drawn: {}",
+            self.wall.key(),
+            self.frames_drawn
         ));
         Ok(())
     }
@@ -155,15 +162,26 @@ impl App {
             .screenshot
             .clone()
             .ok_or("no screenshot path")?;
-        let (_, renderer) = self.state.as_mut().ok_or("no renderer")?;
-        renderer.render(&self.shapes, Some(canvas_rect()), demo::CLEAR);
-        let (w, h) = renderer.target_size().ok_or("no render target")?;
+        let (_, renderer) = self.state.as_ref().ok_or("no renderer")?;
+        let (w, h) = renderer.size().ok_or("no wallpaper rendered")?;
         let pixels = renderer.read_pixels().ok_or("could not read pixels")?;
         write_png(&path, w, h, &pixels)?;
         Ok(path)
     }
 
-    /// Mouse-as-touch: feeds the gesture recogniser and reports what it saw.
+    fn set_wallpaper(&mut self, wall: Wall) {
+        if self.wall == wall {
+            return;
+        }
+        self.wall = wall;
+        if let Err(e) = self.render_wallpaper() {
+            eprintln!("sphatik-preview: {e}");
+        }
+        if let Some((s, _)) = self.state.as_ref() {
+            s.window.request_redraw();
+        }
+    }
+
     fn pointer(&mut self, pressed: Option<bool>) {
         let now = self.now_ms();
         match (pressed, self.touch.as_mut()) {
@@ -182,15 +200,12 @@ impl App {
                 } else {
                     None
                 };
-                let v = t.velocity();
                 eprintln!(
-                    "touch: from ({:.0}, {:.0}) moved ({:.0}, {:.0}), v = ({:.2}, {:.2}) pt/ms -> {:?}",
+                    "touch: from ({:.0}, {:.0}) moved ({:.0}, {:.0}) -> {:?}",
                     t.start().x,
                     t.start().y,
                     t.delta().x,
                     t.delta().y,
-                    v.x,
-                    v.y,
                     kind
                 );
                 self.touch = None;
@@ -229,7 +244,7 @@ impl ApplicationHandler for App {
                 if let Some((s, _)) = self.state.as_ref() {
                     s.resize(width, height);
                 }
-                if let Err(e) = self.resize_target(width, height) {
+                if let Err(e) = self.render_wallpaper() {
                     self.fail(event_loop, format!("resize failed: {e}"));
                     return;
                 }
@@ -240,6 +255,30 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if let Err(e) = self.redraw() {
                     self.fail(event_loop, format!("draw failed: {e}"));
+                }
+            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(code),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => {
+                let pick = match code {
+                    KeyCode::Digit1 => Some(Wall::Aurora),
+                    KeyCode::Digit2 => Some(Wall::Obsidian),
+                    KeyCode::Digit3 => Some(Wall::Dawn),
+                    KeyCode::Digit4 => Some(Wall::Night),
+                    KeyCode::Escape => {
+                        event_loop.exit();
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(wall) = pick {
+                    self.set_wallpaper(wall);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -265,10 +304,6 @@ impl ApplicationHandler for App {
     }
 }
 
-fn canvas_rect() -> Rect {
-    Rect::new(0.0, 0.0, CANVAS.width, CANVAS.height)
-}
-
 /// Zoom so the whole 852 pt tall canvas fits in 85% of the monitor height.
 fn fit_zoom(event_loop: &ActiveEventLoop) -> f32 {
     let Some(monitor) = event_loop.primary_monitor() else {
@@ -289,6 +324,13 @@ fn write_png(path: &PathBuf, width: u32, height: u32, rgba: &[u8]) -> Result<(),
 
 fn main() -> ExitCode {
     let options = Options::parse();
+    if wall_from_name(&options.wallpaper).is_none() {
+        eprintln!(
+            "sphatik-preview: unknown wallpaper `{}` (use aurora, obsidian, dawn or night)",
+            options.wallpaper
+        );
+        return ExitCode::FAILURE;
+    }
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(e) => {
@@ -307,15 +349,7 @@ fn main() -> ExitCode {
         drop(s);
     }
     match app.result {
-        Ok(()) => {
-            if app.frames_drawn > 0 {
-                println!(
-                    "frames drawn: {} (last {:.2} ms CPU)",
-                    app.frames_drawn, app.last_frame_ms
-                );
-            }
-            ExitCode::SUCCESS
-        }
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("sphatik-preview: {e}");
             ExitCode::FAILURE

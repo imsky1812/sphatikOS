@@ -12,7 +12,9 @@ workspace = true
 
 [dependencies]
 glow = "0.18.0"
+lyon = "1.0.19"
 
 [dev-dependencies]
 khronos-egl = { version = "6.0.0", features = ["dynamic"] }
 png = "0.18"
+resvg = "0.48.1"
