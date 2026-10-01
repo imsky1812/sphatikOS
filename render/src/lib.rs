@@ -17,9 +17,11 @@ mod renderer;
 mod shaders;
 pub mod vector;
 pub mod wallpaper;
+mod wallpaper_gl;
 
 pub use damage::Damage;
 pub use geom::Rect;
 pub use glow;
 pub use paint::{Color, Paint, Shape, Stops, MAX_STOPS};
 pub use renderer::{FrameStats, RenderError, Renderer};
+pub use wallpaper_gl::WallpaperRenderer;

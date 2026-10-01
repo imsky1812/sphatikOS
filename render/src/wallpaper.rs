@@ -291,6 +291,11 @@ fn ribbon(p: &RibbonPalette, _flip_only_marker: bool) -> Wallpaper {
     } else {
         Affine::IDENTITY
     };
+    // SVG paints each objectBoundingBox gradient in the path's local space,
+    // then the group transform mirrors the painted result. Baking the mirror
+    // into the geometry flips the bounding box, so a gradient's x endpoints
+    // must be flipped (u -> 1 - u) to match.
+    let fx = |x: f32| if p.flip { 1.0 - x } else { x };
     let mut ops = Vec::new();
 
     // 1. Background gradient (outside the mirrored body).
@@ -347,7 +352,7 @@ fn ribbon(p: &RibbonPalette, _flip_only_marker: bool) -> Wallpaper {
     for i in [1usize, 2] {
         let mesh = vector::fill(&vector::parse_path(RIBBONS[i].0, tf).expect("ribbon"))
             .expect("ribbon fill");
-        let paint = linear(&mesh, [0.0, 0.2], [1.0, 0.0], rg(i));
+        let paint = linear(&mesh, [fx(0.0), 0.2], [fx(1.0), 0.0], rg(i));
         glow_fills.push(Fill {
             mesh,
             paint,
@@ -366,12 +371,12 @@ fn ribbon(p: &RibbonPalette, _flip_only_marker: bool) -> Wallpaper {
         let path = vector::parse_path(body, tf).expect("ribbon body");
         let mesh = vector::fill(&path).expect("ribbon fill");
         ops.push(Op::Fill(Fill {
-            paint: linear(&mesh, [0.0, 0.2], [1.0, 0.0], rg(i)),
+            paint: linear(&mesh, [fx(0.0), 0.2], [fx(1.0), 0.0], rg(i)),
             mesh: mesh.clone(),
             opacity: 1.0,
         }));
         ops.push(Op::Fill(Fill {
-            paint: linear(&mesh, [0.0, 0.0], [0.0, 1.0], shade()),
+            paint: linear(&mesh, [fx(0.0), 0.0], [fx(0.0), 1.0], shade()),
             mesh,
             opacity: 1.0,
         }));
@@ -380,7 +385,7 @@ fn ribbon(p: &RibbonPalette, _flip_only_marker: bool) -> Wallpaper {
             let width = if i == 3 { 1.0 } else { 1.4 };
             let stroke = vector::stroke(&tp, width, false).expect("ribbon edge");
             ops.push(Op::Fill(Fill {
-                paint: linear(&stroke, [0.0, 0.0], [1.0, 0.0], hl_stops),
+                paint: linear(&stroke, [fx(0.0), 0.0], [fx(1.0), 0.0], hl_stops),
                 mesh: stroke,
                 opacity: 0.85,
             }));
