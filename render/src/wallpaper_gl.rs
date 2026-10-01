@@ -18,11 +18,11 @@ const BLUR_DOWNSCALE: u32 = 4;
 /// Must match `RMAX` in the blur shader.
 const BLUR_RMAX: i32 = 72;
 
-struct Fbo {
-    framebuffer: glow::Framebuffer,
-    texture: glow::Texture,
-    width: u32,
-    height: u32,
+pub(crate) struct Fbo {
+    pub(crate) framebuffer: glow::Framebuffer,
+    pub(crate) texture: glow::Texture,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 struct MeshUniforms {
@@ -605,7 +605,7 @@ unsafe fn screen_blend(gl: &glow::Context) {
     gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_COLOR);
 }
 
-fn create_fbo(gl: &glow::Context, width: u32, height: u32) -> Result<Fbo, RenderError> {
+pub(crate) fn create_fbo(gl: &glow::Context, width: u32, height: u32) -> Result<Fbo, RenderError> {
     if width == 0 || height == 0 || width > i32::MAX as u32 || height > i32::MAX as u32 {
         return Err(RenderError::Size);
     }
@@ -665,7 +665,7 @@ fn create_fbo(gl: &glow::Context, width: u32, height: u32) -> Result<Fbo, Render
     }
 }
 
-fn delete_fbo(gl: &glow::Context, f: Fbo) {
+pub(crate) fn delete_fbo(gl: &glow::Context, f: Fbo) {
     // SAFETY: the context is current; `f` is consumed.
     unsafe {
         gl.delete_framebuffer(f.framebuffer);
@@ -673,7 +673,7 @@ fn delete_fbo(gl: &glow::Context, f: Fbo) {
     }
 }
 
-fn link(
+pub(crate) fn link(
     gl: &glow::Context,
     header: &str,
     vertex: &str,

@@ -194,3 +194,99 @@ void main() {
     o_color = texture(u_tex, v_uv) * u_opacity;
 }
 "#;
+
+/// Copies a texture to the bound target (used to seed the scene and to
+/// downsample the backdrop for blurring).
+pub const COPY_FRAGMENT: &str = r#"
+in vec2 v_uv;
+uniform sampler2D u_tex;
+out vec4 o_color;
+void main() { o_color = texture(u_tex, v_uv); }
+"#;
+
+/// One dual-Kawase-style blur pass: average of four diagonal taps.
+pub const KAWASE_FRAGMENT: &str = r#"
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_offset;   // texel offset for this pass
+out vec4 o_color;
+void main() {
+    vec4 c = texture(u_tex, v_uv + vec2( u_offset.x,  u_offset.y));
+    c += texture(u_tex, v_uv + vec2( u_offset.x, -u_offset.y));
+    c += texture(u_tex, v_uv + vec2(-u_offset.x,  u_offset.y));
+    c += texture(u_tex, v_uv + vec2(-u_offset.x, -u_offset.y));
+    o_color = c * 0.25;
+}
+"#;
+
+/// A rounded glass panel: the blurred backdrop inside a continuous-curvature
+/// rounded rectangle, with the material's gradient fill composited on top.
+/// Glass v0 — refraction, rim, specular and dispersion arrive in WP 2.5.
+pub const GLASS_VERTEX: &str = r#"
+in vec2 a_unit;
+uniform vec2 u_canvas;
+uniform vec4 u_rect;     // x, y, w, h in points
+out vec2 v_pos;          // position in points
+out vec2 v_uv;           // position in the backdrop texture (bottom-up)
+void main() {
+    vec2 pad = vec2(1.0);
+    vec2 p = u_rect.xy - pad + a_unit * (u_rect.zw + 2.0 * pad);
+    v_pos = p;
+    // The backdrop texture has a bottom-left origin; flip y so the panel
+    // samples the wallpaper directly behind it.
+    v_uv = vec2(p.x / u_canvas.x, 1.0 - p.y / u_canvas.y);
+    vec2 ndc = vec2(p.x / u_canvas.x * 2.0 - 1.0, 1.0 - p.y / u_canvas.y * 2.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+"#;
+
+/// Fragment shader for a glass panel.
+pub const GLASS_FRAGMENT: &str = r#"
+in vec2 v_pos;
+in vec2 v_uv;
+uniform sampler2D u_backdrop;   // blurred wallpaper
+uniform vec4 u_rect;
+uniform float u_radius;
+uniform float u_scale;          // pixels per point
+uniform vec4 u_frame;           // gradient box in points
+uniform vec4 u_geom;            // linear from/to in box units
+uniform int u_count;
+uniform int u_premul;
+uniform vec4 u_colors[8];
+uniform float u_offsets[8];
+out vec4 o_color;
+
+float sd_round_rect(vec2 p, vec2 c, vec2 h, float r) {
+    vec2 q = abs(p - c) - h + vec2(r);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+vec4 premul(vec4 c) { return vec4(c.rgb * c.a, c.a); }
+vec4 ramp(float t) {
+    t = clamp(t, 0.0, 1.0);
+    if (t <= u_offsets[0]) { return premul(u_colors[0]); }
+    for (int i = 1; i < 8; i++) {
+        if (i >= u_count) { break; }
+        if (t <= u_offsets[i]) {
+            float span = max(u_offsets[i] - u_offsets[i - 1], 1e-6);
+            float f = (t - u_offsets[i - 1]) / span;
+            if (u_premul == 1) { return mix(premul(u_colors[i - 1]), premul(u_colors[i]), f); }
+            return premul(mix(u_colors[i - 1], u_colors[i], f));
+        }
+    }
+    return premul(u_colors[u_count - 1]);
+}
+void main() {
+    float r = min(u_radius, 0.5 * min(u_rect.z, u_rect.w));
+    float d = sd_round_rect(v_pos, u_rect.xy + 0.5 * u_rect.zw, 0.5 * u_rect.zw, r);
+    float coverage = clamp(0.5 - d * u_scale, 0.0, 1.0);
+
+    vec3 backdrop = texture(u_backdrop, v_uv).rgb;   // opaque, straight alpha
+    vec2 u = (v_pos - u_frame.xy) / u_frame.zw;
+    vec2 ab = u_geom.zw - u_geom.xy;
+    float t = dot(u - u_geom.xy, ab) / max(dot(ab, ab), 1e-12);
+    vec4 fill = ramp(t);                              // premultiplied
+    // Material fill over the blurred backdrop.
+    vec3 rgb = fill.rgb + backdrop * (1.0 - fill.a);
+    o_color = vec4(rgb, 1.0) * coverage;
+}
+"#;
