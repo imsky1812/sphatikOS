@@ -90,6 +90,19 @@ impl Headless {
             gl,
         ))
     }
+
+    /// Builds another `glow` handle to the same context, for a second renderer.
+    pub fn glow(&self) -> glow::Context {
+        // SAFETY: the context is current on this thread; the loader returns
+        // its function pointers.
+        unsafe {
+            glow::Context::from_loader_function(|name| {
+                self.egl
+                    .get_proc_address(name)
+                    .map_or(std::ptr::null(), |f| f as *const _)
+            })
+        }
+    }
 }
 
 impl Drop for Headless {
