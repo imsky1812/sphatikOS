@@ -12,6 +12,7 @@
 mod damage;
 pub mod demo;
 mod geom;
+mod glass;
 mod paint;
 mod renderer;
 mod shaders;
@@ -21,6 +22,7 @@ mod wallpaper_gl;
 
 pub use damage::Damage;
 pub use geom::Rect;
+pub use glass::{GlassPanel, GlassRenderer};
 pub use glow;
 pub use paint::{Color, Paint, Shape, Stops, MAX_STOPS};
 pub use renderer::{FrameStats, RenderError, Renderer};
