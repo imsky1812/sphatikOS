@@ -28,6 +28,9 @@ pub struct GlassPanel {
     pub radius: f32,
     /// The material's gradient fill, composited over the blurred backdrop.
     pub fill: Paint,
+    /// The specular spot position, 0..1 across the panel (from the pointer or
+    /// the gyroscope). The prototype's default is `--lx:30% --ly:0%`.
+    pub light: [f32; 2],
 }
 
 impl GlassPanel {
@@ -43,15 +46,28 @@ impl GlassPanel {
                 (1.0, crate::Color::WHITE.with_alpha(0.07)),
             ]),
         );
-        Self { rect, radius, fill }
+        Self {
+            rect,
+            radius,
+            fill,
+            light: [0.3, 0.0],
+        }
+    }
+
+    /// Sets the specular light position, 0..1 across the panel.
+    pub fn with_light(mut self, light: [f32; 2]) -> Self {
+        self.light = light;
+        self
     }
 }
 
 struct GlassUniforms {
     canvas: Option<glow::UniformLocation>,
     rect: Option<glow::UniformLocation>,
+    pad: Option<glow::UniformLocation>,
     radius: Option<glow::UniformLocation>,
     scale: Option<glow::UniformLocation>,
+    light: Option<glow::UniformLocation>,
     frame: Option<glow::UniformLocation>,
     geom: Option<glow::UniformLocation>,
     count: Option<glow::UniformLocation>,
@@ -61,16 +77,37 @@ struct GlassUniforms {
     backdrop: Option<glow::UniformLocation>,
 }
 
+struct ShadowUniforms {
+    canvas: Option<glow::UniformLocation>,
+    rect: Option<glow::UniformLocation>,
+    pad: Option<glow::UniformLocation>,
+    radius: Option<glow::UniformLocation>,
+    scale: Option<glow::UniformLocation>,
+    offset: Option<glow::UniformLocation>,
+    spread: Option<glow::UniformLocation>,
+    alpha: Option<glow::UniformLocation>,
+}
+
+/// Drop-shadow geometry, in points.
+const SHADOW_OFFSET: f32 = 16.0;
+const SHADOW_SPREAD: f32 = 34.0;
+const SHADOW_ALPHA: f32 = 0.42;
+const SHADOW_PAD: f32 = SHADOW_OFFSET + SHADOW_SPREAD + 4.0;
+/// Glass quad padding (room for 1 px antialiasing).
+const GLASS_PAD: f32 = 2.0;
+
 /// Composites glass panels over a backdrop texture into a scene texture.
 pub struct GlassRenderer {
     gl: glow::Context,
     copy_program: glow::Program,
     kawase_program: glow::Program,
     glass_program: glow::Program,
+    shadow_program: glow::Program,
     copy_tex: Option<glow::UniformLocation>,
     kawase_tex: Option<glow::UniformLocation>,
     kawase_offset: Option<glow::UniformLocation>,
     glass: GlassUniforms,
+    shadow: ShadowUniforms,
     quad_vao: glow::VertexArray,
     quad_vbo: glow::Buffer,
     scene: Option<Fbo>,
@@ -93,6 +130,8 @@ impl GlassRenderer {
             wallpaper_gl::link(&gl, header, shaders::QUAD_VERTEX, shaders::KAWASE_FRAGMENT)?;
         let glass_program =
             wallpaper_gl::link(&gl, header, shaders::GLASS_VERTEX, shaders::GLASS_FRAGMENT)?;
+        let shadow_program =
+            wallpaper_gl::link(&gl, header, shaders::GLASS_VERTEX, shaders::SHADOW_FRAGMENT)?;
 
         // SAFETY: the caller made the context current; the quad buffer and VAO
         // are created on it here.
@@ -104,7 +143,7 @@ impl GlassRenderer {
             let quad: [f32; 8] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0];
             let bytes: Vec<u8> = quad.iter().flat_map(|v| v.to_ne_bytes()).collect();
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &bytes, glow::STATIC_DRAW);
-            for prog in [copy_program, kawase_program, glass_program] {
+            for prog in [copy_program, kawase_program, glass_program, shadow_program] {
                 let loc = gl.get_attrib_location(prog, "a_unit").unwrap_or(0);
                 gl.enable_vertex_attrib_array(loc);
                 gl.vertex_attrib_pointer_f32(loc, 2, glow::FLOAT, false, 8, 0);
@@ -123,8 +162,10 @@ impl GlassRenderer {
             glass: GlassUniforms {
                 canvas: u(glass_program, "u_canvas"),
                 rect: u(glass_program, "u_rect"),
+                pad: u(glass_program, "u_pad"),
                 radius: u(glass_program, "u_radius"),
                 scale: u(glass_program, "u_scale"),
+                light: u(glass_program, "u_light"),
                 frame: u(glass_program, "u_frame"),
                 geom: u(glass_program, "u_geom"),
                 count: u(glass_program, "u_count"),
@@ -133,10 +174,21 @@ impl GlassRenderer {
                 offsets: u(glass_program, "u_offsets"),
                 backdrop: u(glass_program, "u_backdrop"),
             },
+            shadow: ShadowUniforms {
+                canvas: u(shadow_program, "u_canvas"),
+                rect: u(shadow_program, "u_rect"),
+                pad: u(shadow_program, "u_pad"),
+                radius: u(shadow_program, "u_radius"),
+                scale: u(shadow_program, "u_scale"),
+                offset: u(shadow_program, "u_offset"),
+                spread: u(shadow_program, "u_spread"),
+                alpha: u(shadow_program, "u_alpha"),
+            },
             gl,
             copy_program,
             kawase_program,
             glass_program,
+            shadow_program,
             quad_vao,
             quad_vbo,
             scene: None,
@@ -234,17 +286,41 @@ impl GlassRenderer {
             };
             let blurred = blurred.expect("blurred").texture;
 
-            // Draw each glass panel over the scene.
+            // Draw each panel's drop shadow, then the glass, over the scene.
             let scene = self.scene.as_ref().expect("scene");
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene.framebuffer));
             gl.viewport(0, 0, width as i32, height as i32);
             gl.enable(glow::BLEND);
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+            let scale = width as f32 / canvas_w;
+
+            // Shadows first (no texture needed).
+            gl.use_program(Some(self.shadow_program));
+            let s = &self.shadow;
+            gl.uniform_2_f32(s.canvas.as_ref(), canvas_w, canvas_h);
+            gl.uniform_2_f32(s.pad.as_ref(), SHADOW_PAD, SHADOW_PAD);
+            gl.uniform_1_f32(s.scale.as_ref(), scale);
+            gl.uniform_1_f32(s.offset.as_ref(), SHADOW_OFFSET);
+            gl.uniform_1_f32(s.spread.as_ref(), SHADOW_SPREAD);
+            gl.uniform_1_f32(s.alpha.as_ref(), SHADOW_ALPHA);
+            for panel in panels {
+                gl.uniform_4_f32(
+                    s.rect.as_ref(),
+                    panel.rect.x,
+                    panel.rect.y,
+                    panel.rect.w,
+                    panel.rect.h,
+                );
+                gl.uniform_1_f32(s.radius.as_ref(), panel.radius.max(0.0));
+                gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+            }
+
+            // Then the glass panels.
             gl.use_program(Some(self.glass_program));
             gl.bind_texture(glow::TEXTURE_2D, Some(blurred));
             gl.uniform_1_i32(self.glass.backdrop.as_ref(), 0);
-            let scale = width as f32 / canvas_w;
             gl.uniform_2_f32(self.glass.canvas.as_ref(), canvas_w, canvas_h);
+            gl.uniform_2_f32(self.glass.pad.as_ref(), GLASS_PAD, GLASS_PAD);
             gl.uniform_1_f32(self.glass.scale.as_ref(), scale);
             for panel in panels {
                 self.set_panel(panel);
@@ -328,6 +404,7 @@ impl GlassRenderer {
             self.gl.delete_program(self.copy_program);
             self.gl.delete_program(self.kawase_program);
             self.gl.delete_program(self.glass_program);
+            self.gl.delete_program(self.shadow_program);
         }
     }
 
@@ -345,6 +422,7 @@ impl GlassRenderer {
             panel.rect.h,
         );
         gl.uniform_1_f32(g.radius.as_ref(), panel.radius.max(0.0));
+        gl.uniform_2_f32(g.light.as_ref(), panel.light[0], panel.light[1]);
         let mut colors = [0.0f32; MAX_STOPS * 4];
         let mut offsets = [0.0f32; MAX_STOPS];
         let (frame, geom, count, premul) = match panel.fill {
