@@ -219,42 +219,48 @@ void main() {
 }
 "#;
 
-/// A rounded glass panel: the blurred backdrop inside a continuous-curvature
-/// rounded rectangle, with the material's gradient fill composited on top.
-/// Glass v0 — refraction, rim, specular and dispersion arrive in WP 2.5.
+/// A rounded glass panel over a blurred backdrop, with edge refraction, the
+/// material gradient fill, inner rim highlights, a specular sheen that follows
+/// a light position, and a prism-tinted outer rim (glass v1, WP 2.5). Models
+/// the prototype's lens-light `.glass` treatment (reference section 3).
 pub const GLASS_VERTEX: &str = r#"
 in vec2 a_unit;
 uniform vec2 u_canvas;
 uniform vec4 u_rect;     // x, y, w, h in points
+uniform vec2 u_pad;      // quad padding around the rect, points
 out vec2 v_pos;          // position in points
-out vec2 v_uv;           // position in the backdrop texture (bottom-up)
+out vec2 v_local;        // 0..1 across the rect
 void main() {
-    vec2 pad = vec2(1.0);
+    vec2 pad = u_pad;
     vec2 p = u_rect.xy - pad + a_unit * (u_rect.zw + 2.0 * pad);
     v_pos = p;
-    // The backdrop texture has a bottom-left origin; flip y so the panel
-    // samples the wallpaper directly behind it.
-    v_uv = vec2(p.x / u_canvas.x, 1.0 - p.y / u_canvas.y);
+    v_local = (p - u_rect.xy) / u_rect.zw;
     vec2 ndc = vec2(p.x / u_canvas.x * 2.0 - 1.0, 1.0 - p.y / u_canvas.y * 2.0);
     gl_Position = vec4(ndc, 0.0, 1.0);
 }
 "#;
 
-/// Fragment shader for a glass panel.
+/// Fragment shader for a glass panel (glass v1).
 pub const GLASS_FRAGMENT: &str = r#"
 in vec2 v_pos;
-in vec2 v_uv;
-uniform sampler2D u_backdrop;   // blurred wallpaper
+in vec2 v_local;
+uniform sampler2D u_backdrop;   // blurred wallpaper (bottom-up)
+uniform vec2 u_canvas;          // points
 uniform vec4 u_rect;
 uniform float u_radius;
 uniform float u_scale;          // pixels per point
-uniform vec4 u_frame;           // gradient box in points
-uniform vec4 u_geom;            // linear from/to in box units
+uniform vec2 u_light;           // specular spot, 0..1 across the panel
+uniform vec4 u_frame;           // fill gradient box in points
+uniform vec4 u_geom;            // fill linear from/to in box units
 uniform int u_count;
 uniform int u_premul;
 uniform vec4 u_colors[8];
 uniform float u_offsets[8];
 out vec4 o_color;
+
+const float REFRACT_WIDTH = 16.0;  // how far in the edge bend reaches, points
+const float REFRACT_PX = 6.0;      // peak inward bend, points
+const float RING = 1.0;            // prism rim half-width, points
 
 float sd_round_rect(vec2 p, vec2 c, vec2 h, float r) {
     vec2 q = abs(p - c) - h + vec2(r);
@@ -275,18 +281,107 @@ vec4 ramp(float t) {
     }
     return premul(u_colors[u_count - 1]);
 }
-void main() {
-    float r = min(u_radius, 0.5 * min(u_rect.z, u_rect.w));
-    float d = sd_round_rect(v_pos, u_rect.xy + 0.5 * u_rect.zw, 0.5 * u_rect.zw, r);
-    float coverage = clamp(0.5 - d * u_scale, 0.0, 1.0);
 
-    vec3 backdrop = texture(u_backdrop, v_uv).rgb;   // opaque, straight alpha
+vec3 backdrop_at(vec2 pos) {
+    vec2 uv = vec2(pos.x / u_canvas.x, 1.0 - pos.y / u_canvas.y);
+    return texture(u_backdrop, uv).rgb;
+}
+
+// The prototype's ::after rim gradient along the 155-degree diagonal.
+vec4 prism(float s) {
+    s = clamp(s, 0.0, 1.0);
+    if (s < 0.30) return mix(vec4(1.0, 1.0, 1.0, 0.90), vec4(1.0, 1.0, 1.0, 0.12), s / 0.30);
+    if (s < 0.55) return mix(vec4(1.0, 1.0, 1.0, 0.12), vec4(1.0, 1.0, 1.0, 0.04), (s - 0.30) / 0.25);
+    if (s < 0.80) return mix(vec4(1.0, 1.0, 1.0, 0.04), vec4(0.667, 0.922, 1.0, 0.35), (s - 0.55) / 0.25);
+    return mix(vec4(0.667, 0.922, 1.0, 0.35), vec4(1.0, 0.784, 0.922, 0.60), (s - 0.80) / 0.20);
+}
+
+void main() {
+    vec2 c = u_rect.xy + 0.5 * u_rect.zw;
+    vec2 h = 0.5 * u_rect.zw;
+    float r = min(u_radius, min(h.x, h.y));
+    float d = sd_round_rect(v_pos, c, h, r);     // negative inside
+    float aa = 1.0 / u_scale;
+    float coverage = clamp(0.5 - d * u_scale, 0.0, 1.0);
+    if (coverage <= 0.0) { discard; }
+
+    // Outward normal of the rounded rect (finite differences).
+    vec2 e = vec2(1.0, 0.0);
+    vec2 n = normalize(vec2(
+        sd_round_rect(v_pos + e.xy, c, h, r) - sd_round_rect(v_pos - e.xy, c, h, r),
+        sd_round_rect(v_pos + e.yx, c, h, r) - sd_round_rect(v_pos - e.yx, c, h, r)
+    ) + 1e-6);
+
+    // Edge refraction: bend the backdrop inward near the rim, with a small
+    // red/blue split for dispersion.
+    float inside = max(-d, 0.0);
+    float edge = 1.0 - clamp(inside / REFRACT_WIDTH, 0.0, 1.0);
+    edge *= edge;
+    vec2 bend = -n * edge * REFRACT_PX;
+    vec3 backdrop;
+    backdrop.r = backdrop_at(v_pos + bend * 1.08).r;
+    backdrop.g = backdrop_at(v_pos + bend).g;
+    backdrop.b = backdrop_at(v_pos + bend * 0.92).b;
+
+    // Material gradient fill over the blurred, refracted backdrop.
     vec2 u = (v_pos - u_frame.xy) / u_frame.zw;
     vec2 ab = u_geom.zw - u_geom.xy;
-    float t = dot(u - u_geom.xy, ab) / max(dot(ab, ab), 1e-12);
-    vec4 fill = ramp(t);                              // premultiplied
-    // Material fill over the blurred backdrop.
+    float tg = dot(u - u_geom.xy, ab) / max(dot(ab, ab), 1e-12);
+    vec4 fill = ramp(tg);
     vec3 rgb = fill.rgb + backdrop * (1.0 - fill.a);
-    o_color = vec4(rgb, 1.0) * coverage;
+
+    // Inner glows (the prototype's inset box-shadows): a soft band inside the
+    // top edge and a fainter one inside the bottom. Kept gentle so the glass
+    // stays translucent rather than plastic.
+    float top = v_pos.y - u_rect.y;
+    float bottom = (u_rect.y + u_rect.w) - v_pos.y;
+    rgb += 0.24 * (1.0 - smoothstep(0.0, 12.0, top));
+    rgb += 0.12 * (1.0 - smoothstep(0.0, 14.0, bottom));
+
+    // Specular sheen: a soft radial spot at the light plus a faint diagonal
+    // band, both subtle.
+    float spot = 1.0 - smoothstep(0.0, 0.65, length(v_local - u_light));
+    rgb += 0.13 * spot;
+    float band = dot(v_local, normalize(vec2(0.9, 0.42)));
+    rgb += 0.05 * (1.0 - smoothstep(0.04, 0.24, abs(band - 0.42)));
+
+    // Crisp top hairline (inset 0 1px 0): a thin bright line along the top edge.
+    rgb += 0.40 * (1.0 - smoothstep(0.0, 1.6, top));
+
+    // Prism rim: a thin 155-degree tinted ring just inside the edge, softened.
+    float ring = (1.0 - smoothstep(0.0, RING + aa, abs(d))) * 0.6;
+    float s = dot(v_local, normalize(vec2(0.42, 0.9)));
+    vec4 rim = prism(s);
+    rgb = mix(rgb, rgb * (1.0 - rim.a) + rim.rgb * rim.a, ring);
+
+    o_color = vec4(min(rgb, vec3(1.0)), 1.0) * coverage;
+}
+"#;
+
+/// A soft drop shadow for a floating glass panel (the prototype's outer
+/// box-shadow). Drawn before the panel, offset downward.
+pub const SHADOW_FRAGMENT: &str = r#"
+in vec2 v_pos;
+in vec2 v_local;
+uniform vec4 u_rect;
+uniform float u_radius;
+uniform float u_scale;
+uniform float u_offset;    // downward shift, points
+uniform float u_spread;    // feather, points
+uniform float u_alpha;     // peak opacity
+out vec4 o_color;
+float sd_round_rect(vec2 p, vec2 c, vec2 h, float r) {
+    vec2 q = abs(p - c) - h + vec2(r);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+void main() {
+    vec2 c = u_rect.xy + 0.5 * u_rect.zw + vec2(0.0, u_offset);
+    // The prototype's shadow is spread inward (-20 px), so it is narrower than
+    // the panel; inset the shape a little.
+    vec2 h = max(0.5 * u_rect.zw - vec2(10.0), vec2(1.0));
+    float r = min(u_radius, min(h.x, h.y));
+    float d = sd_round_rect(v_pos, c, h, r);
+    float a = u_alpha * (1.0 - smoothstep(0.0, u_spread, max(d, 0.0)));
+    o_color = vec4(0.0157, 0.0118, 0.0706, 1.0) * a;  // rgba(4,3,18,.7)-ish, premultiplied
 }
 "#;
