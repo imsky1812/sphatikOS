@@ -13,11 +13,12 @@ use crate::shaders;
 use crate::wallpaper_gl::{self, Fbo};
 use crate::{Paint, Rect, RenderError, Stops, MAX_STOPS};
 
-/// Kawase pass texel offsets, in quarter-resolution texels, applied in order.
-/// Tuned so Regular glass reads like the prototype's 16 px blur.
-const KAWASE_OFFSETS: &[f32] = &[1.0, 1.5, 2.5, 2.5];
+/// Kawase pass texel offsets, in blur-resolution texels, applied in order.
+/// A smooth progression at half resolution gives a clean, Gaussian-like
+/// frosted blur close to the prototype's 16 px backdrop-filter.
+const KAWASE_OFFSETS: &[f32] = &[1.0, 2.0, 3.0, 4.0, 5.0, 5.0];
 /// The backdrop is blurred at this fraction of the output resolution.
-const BLUR_DOWNSCALE: u32 = 4;
+const BLUR_DOWNSCALE: u32 = 2;
 
 /// One rounded glass panel.
 #[derive(Clone, Debug, PartialEq)]
@@ -89,9 +90,9 @@ struct ShadowUniforms {
 }
 
 /// Drop-shadow geometry, in points.
-const SHADOW_OFFSET: f32 = 16.0;
-const SHADOW_SPREAD: f32 = 34.0;
-const SHADOW_ALPHA: f32 = 0.42;
+const SHADOW_OFFSET: f32 = 14.0;
+const SHADOW_SPREAD: f32 = 30.0;
+const SHADOW_ALPHA: f32 = 0.30;
 const SHADOW_PAD: f32 = SHADOW_OFFSET + SHADOW_SPREAD + 4.0;
 /// Glass quad padding (room for 1 px antialiasing).
 const GLASS_PAD: f32 = 2.0;

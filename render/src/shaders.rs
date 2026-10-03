@@ -260,7 +260,7 @@ out vec4 o_color;
 
 const float REFRACT_WIDTH = 16.0;  // how far in the edge bend reaches, points
 const float REFRACT_PX = 6.0;      // peak inward bend, points
-const float RING = 1.3;            // prism rim half-width, points
+const float RING = 1.0;            // prism rim half-width, points
 
 float sd_round_rect(vec2 p, vec2 c, vec2 h, float r) {
     vec2 q = abs(p - c) - h + vec2(r);
@@ -330,21 +330,26 @@ void main() {
     vec4 fill = ramp(tg);
     vec3 rgb = fill.rgb + backdrop * (1.0 - fill.a);
 
-    // Inner glows (the prototype's inset box-shadows): a bright band inside the
-    // top edge and a softer one inside the bottom.
+    // Inner glows (the prototype's inset box-shadows): a soft band inside the
+    // top edge and a fainter one inside the bottom. Kept gentle so the glass
+    // stays translucent rather than plastic.
     float top = v_pos.y - u_rect.y;
     float bottom = (u_rect.y + u_rect.w) - v_pos.y;
-    rgb += 0.45 * (1.0 - smoothstep(0.0, 16.0, top));
-    rgb += 0.28 * (1.0 - smoothstep(0.0, 18.0, bottom));
+    rgb += 0.24 * (1.0 - smoothstep(0.0, 12.0, top));
+    rgb += 0.12 * (1.0 - smoothstep(0.0, 14.0, bottom));
 
-    // Specular sheen: a radial spot at the light plus a faint diagonal band.
-    float spot = 1.0 - smoothstep(0.0, 0.6, length(v_local - u_light));
-    rgb += 0.22 * spot;
+    // Specular sheen: a soft radial spot at the light plus a faint diagonal
+    // band, both subtle.
+    float spot = 1.0 - smoothstep(0.0, 0.65, length(v_local - u_light));
+    rgb += 0.13 * spot;
     float band = dot(v_local, normalize(vec2(0.9, 0.42)));
-    rgb += 0.07 * (1.0 - smoothstep(0.06, 0.16, abs(band - 0.42)));
+    rgb += 0.05 * (1.0 - smoothstep(0.04, 0.24, abs(band - 0.42)));
 
-    // Prism rim: the 155-degree tinted ring just inside the edge.
-    float ring = 1.0 - smoothstep(0.0, RING + aa, abs(d));
+    // Crisp top hairline (inset 0 1px 0): a thin bright line along the top edge.
+    rgb += 0.40 * (1.0 - smoothstep(0.0, 1.6, top));
+
+    // Prism rim: a thin 155-degree tinted ring just inside the edge, softened.
+    float ring = (1.0 - smoothstep(0.0, RING + aa, abs(d))) * 0.6;
     float s = dot(v_local, normalize(vec2(0.42, 0.9)));
     vec4 rim = prism(s);
     rgb = mix(rgb, rgb * (1.0 - rim.a) + rim.rgb * rim.a, ring);
@@ -371,7 +376,9 @@ float sd_round_rect(vec2 p, vec2 c, vec2 h, float r) {
 }
 void main() {
     vec2 c = u_rect.xy + 0.5 * u_rect.zw + vec2(0.0, u_offset);
-    vec2 h = 0.5 * u_rect.zw;
+    // The prototype's shadow is spread inward (-20 px), so it is narrower than
+    // the panel; inset the shape a little.
+    vec2 h = max(0.5 * u_rect.zw - vec2(10.0), vec2(1.0));
     float r = min(u_radius, min(h.x, h.y));
     float d = sd_round_rect(v_pos, c, h, r);
     float a = u_alpha * (1.0 - smoothstep(0.0, u_spread, max(d, 0.0)));
