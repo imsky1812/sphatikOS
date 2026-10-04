@@ -385,3 +385,23 @@ void main() {
     o_color = vec4(0.0157, 0.0118, 0.0706, 1.0) * a;  // rgba(4,3,18,.7)-ish, premultiplied
 }
 "#;
+
+/// Flat per-vertex-colour shader for the debug overlay (pixel coordinates).
+pub const OVERLAY_VERTEX: &str = r#"
+in vec2 a_pos;      // pixels, top-left origin
+in vec4 a_color;    // premultiplied
+uniform vec2 u_size;
+out vec4 v_color;
+void main() {
+    v_color = a_color;
+    vec2 ndc = vec2(a_pos.x / u_size.x * 2.0 - 1.0, 1.0 - a_pos.y / u_size.y * 2.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+"#;
+
+/// Fragment for the overlay: the interpolated premultiplied colour.
+pub const OVERLAY_FRAGMENT: &str = r#"
+in vec4 v_color;
+out vec4 o_color;
+void main() { o_color = v_color; }
+"#;

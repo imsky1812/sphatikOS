@@ -209,6 +209,12 @@ impl GlassRenderer {
         self.scene.as_ref().map(|f| (f.width, f.height))
     }
 
+    /// The scene framebuffer, so a caller can draw onto it (for example the
+    /// debug overlay, before a screenshot). None until the first render.
+    pub fn scene_framebuffer(&self) -> Option<glow::Framebuffer> {
+        self.scene.as_ref().map(|f| f.framebuffer)
+    }
+
     /// Composites `panels` over `backdrop` (a `width` x `height` pixel texture
     /// covering the whole `canvas`) into the scene texture.
     pub fn render(
