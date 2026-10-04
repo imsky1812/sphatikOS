@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use sphatik_render::wallpaper::Wall;
-use sphatik_render::{GlassPanel, GlassRenderer, Rect, WallpaperRenderer};
+use sphatik_render::{GlassPanel, GlassRenderer, Overlay, PerfGraph, Rect, WallpaperRenderer};
 use sphatik_shell::gesture::{self, Canvas, Hit, Point, ShellContext, TouchTracker};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -38,6 +38,9 @@ struct Options {
     /// Which wallpaper to show: aurora, obsidian, dawn or night.
     #[arg(long, default_value = "aurora")]
     wallpaper: String,
+    /// Start with the F12 debug overlay visible.
+    #[arg(long)]
+    overlay: bool,
     /// Render one frame to this PNG file and exit.
     #[arg(long, value_name = "PNG")]
     screenshot: Option<PathBuf>,
@@ -60,9 +63,14 @@ fn wall_from_name(name: &str) -> Option<Wall> {
 
 struct App {
     options: Options,
-    state: Option<(gl::GlWindowState, WallpaperRenderer, GlassRenderer)>,
+    state: Option<(gl::GlWindowState, WallpaperRenderer, GlassRenderer, Overlay)>,
+    util_gl: Option<sphatik_render::glow::Context>,
     wall: Wall,
     glass_on: bool,
+    overlay_on: bool,
+    graph: PerfGraph,
+    glass_ms: Option<f32>,
+    last_present: Option<Instant>,
     dirty: bool,
     frames_drawn: u64,
     started: Instant,
@@ -74,11 +82,17 @@ struct App {
 impl App {
     fn new(options: Options) -> Self {
         let wall = wall_from_name(&options.wallpaper).unwrap_or(Wall::Aurora);
+        let options_overlay = options.overlay;
         Self {
             options,
             state: None,
+            util_gl: None,
             wall,
             glass_on: true,
+            overlay_on: options_overlay,
+            graph: PerfGraph::new(1000.0 / 60.0),
+            glass_ms: None,
+            last_present: None,
             dirty: true,
             frames_drawn: 0,
             started: Instant::now(),
@@ -114,8 +128,10 @@ impl App {
             .with_visible(!screenshot);
         let (window_state, glow_ctx) = gl::create(event_loop, attributes)?;
         let glass = GlassRenderer::new(window_state.make_glow())?;
+        let overlay = Overlay::new(window_state.make_glow())?;
+        self.util_gl = Some(window_state.make_glow());
         let wallpaper = WallpaperRenderer::new(glow_ctx)?;
-        self.state = Some((window_state, wallpaper, glass));
+        self.state = Some((window_state, wallpaper, glass, overlay));
         self.render_frame()?;
         Ok(())
     }
@@ -126,15 +142,28 @@ impl App {
         let glass_on = self.glass_on;
         let wall = self.wall;
         let (w, h) = self.target_size();
-        let Some((_, wallpaper, glass)) = self.state.as_mut() else {
+        let util = self.util_gl.as_ref();
+        let mut glass_ms = None;
+        let Some((_, wallpaper, glass, _)) = self.state.as_mut() else {
             return Ok(());
         };
         wallpaper.render(&wall.build(), CANVAS.width, CANVAS.height, w, h)?;
         if glass_on {
             let texture = wallpaper.texture().ok_or("no wallpaper texture")?;
             let panels = [demo_panel()];
-            glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
+            // Time the glass pass with a blocking finish (laptop-indicative;
+            // the real budget is measured on the phone).
+            if let Some(gl) = util {
+                finish(gl);
+                let start = Instant::now();
+                glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
+                finish(gl);
+                glass_ms = Some(start.elapsed().as_secs_f64() as f32 * 1000.0);
+            } else {
+                glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
+            }
         }
+        self.glass_ms = glass_ms;
         self.dirty = true;
         Ok(())
     }
@@ -146,7 +175,7 @@ impl App {
                 (CANVAS.width * s).round() as u32,
                 (CANVAS.height * s).round() as u32,
             )
-        } else if let Some((window_state, _, _)) = self.state.as_ref() {
+        } else if let Some((window_state, _, _, _)) = self.state.as_ref() {
             let size = window_state.window.inner_size();
             (size.width.max(1), size.height.max(1))
         } else {
@@ -155,11 +184,22 @@ impl App {
     }
 
     fn redraw(&mut self) -> Result<(), Box<dyn Error>> {
-        if !self.dirty {
+        let overlay_on = self.overlay_on;
+        if !self.dirty && !overlay_on {
             return Ok(());
         }
+        // Frame interval (wall clock), for the FPS graph.
+        let now = Instant::now();
+        if let Some(prev) = self.last_present {
+            self.graph
+                .push(now.duration_since(prev).as_secs_f64() as f32 * 1000.0);
+        }
+        self.last_present = Some(now);
+
         let glass_on = self.glass_on;
-        let Some((window_state, wallpaper, glass)) = self.state.as_mut() else {
+        let graph = self.graph;
+        let glass_ms = self.glass_ms;
+        let Some((window_state, wallpaper, glass, overlay)) = self.state.as_mut() else {
             return Ok(());
         };
         let size = window_state.window.inner_size();
@@ -168,15 +208,22 @@ impl App {
         } else {
             wallpaper.present(size.width, size.height);
         }
+        if overlay_on {
+            overlay.render(size.width, size.height, 2.0, &graph, glass_ms);
+        }
         window_state.swap()?;
         self.dirty = false;
         self.frames_drawn += 1;
         window_state.window.set_title(&format!(
-            "Sphatik preview · {} · glass {} · frames drawn: {}",
+            "Sphatik preview · {} · glass {} · F12 overlay {}",
             self.wall.key(),
             if glass_on { "on" } else { "off" },
-            self.frames_drawn
+            if overlay_on { "on" } else { "off" },
         ));
+        // Keep redrawing while the overlay is up, for a live graph.
+        if overlay_on {
+            window_state.window.request_redraw();
+        }
         Ok(())
     }
 
@@ -187,18 +234,34 @@ impl App {
             .clone()
             .ok_or("no screenshot path")?;
         let glass_on = self.glass_on;
-        let (_, wallpaper, glass) = self.state.as_ref().ok_or("no renderer")?;
-        let (w, h, pixels) = if glass_on {
-            let (w, h) = glass.size().ok_or("no glass rendered")?;
-            (w, h, glass.read_pixels().ok_or("could not read pixels")?)
-        } else {
+        let overlay_on = self.overlay_on;
+        // A demo graph so the overlay shows a populated frame-time plot.
+        let mut graph = PerfGraph::new(1000.0 / 60.0);
+        for i in 0..90 {
+            let base = 15.0 + ((i as f32 * 0.5).sin() * 1.5);
+            graph.push(if i % 37 == 0 { 24.0 } else { base });
+        }
+        let glass_ms = self.glass_ms;
+        let (_, wallpaper, glass, overlay) = self.state.as_mut().ok_or("no renderer")?;
+        if !glass_on {
             let (w, h) = wallpaper.size().ok_or("no wallpaper rendered")?;
-            (
-                w,
-                h,
-                wallpaper.read_pixels().ok_or("could not read pixels")?,
-            )
-        };
+            let pixels = wallpaper.read_pixels().ok_or("could not read pixels")?;
+            write_png(&path, w, h, &pixels)?;
+            return Ok(path);
+        }
+        let (w, h) = glass.size().ok_or("no glass rendered")?;
+        if overlay_on {
+            // Draw the overlay onto the glass scene so the screenshot shows it.
+            if let (Some(fbo), Some(gl)) = (glass.scene_framebuffer(), self.util_gl.as_ref()) {
+                use sphatik_render::glow::HasContext;
+                // SAFETY: the context is current; `fbo` is the live scene FBO.
+                unsafe { gl.bind_framebuffer(sphatik_render::glow::FRAMEBUFFER, Some(fbo)) };
+                overlay.render(w, h, 2.0, &graph, glass_ms);
+                // SAFETY: as above.
+                unsafe { gl.bind_framebuffer(sphatik_render::glow::FRAMEBUFFER, None) };
+            }
+        }
+        let pixels = glass.read_pixels().ok_or("could not read pixels")?;
         write_png(&path, w, h, &pixels)?;
         Ok(path)
     }
@@ -211,7 +274,7 @@ impl App {
         if let Err(e) = self.render_frame() {
             eprintln!("sphatik-preview: {e}");
         }
-        if let Some((s, _, _)) = self.state.as_ref() {
+        if let Some((s, _, _, _)) = self.state.as_ref() {
             s.window.request_redraw();
         }
     }
@@ -266,7 +329,7 @@ impl ApplicationHandler for App {
             event_loop.exit();
             return;
         }
-        if let Some((s, _, _)) = self.state.as_ref() {
+        if let Some((s, _, _, _)) = self.state.as_ref() {
             s.window.request_redraw();
         }
     }
@@ -275,14 +338,14 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(PhysicalSize { width, height }) => {
-                if let Some((s, _, _)) = self.state.as_ref() {
+                if let Some((s, _, _, _)) = self.state.as_ref() {
                     s.resize(width, height);
                 }
                 if let Err(e) = self.render_frame() {
                     self.fail(event_loop, format!("resize failed: {e}"));
                     return;
                 }
-                if let Some((s, _, _)) = self.state.as_ref() {
+                if let Some((s, _, _, _)) = self.state.as_ref() {
                     s.window.request_redraw();
                 }
             }
@@ -310,7 +373,15 @@ impl ApplicationHandler for App {
                         if let Err(e) = self.render_frame() {
                             eprintln!("sphatik-preview: {e}");
                         }
-                        if let Some((s, _, _)) = self.state.as_ref() {
+                        if let Some((s, _, _, _)) = self.state.as_ref() {
+                            s.window.request_redraw();
+                        }
+                        None
+                    }
+                    KeyCode::F12 => {
+                        self.overlay_on = !self.overlay_on;
+                        self.dirty = true;
+                        if let Some((s, _, _, _)) = self.state.as_ref() {
                             s.window.request_redraw();
                         }
                         None
@@ -326,7 +397,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                if let Some((s, _, _)) = self.state.as_ref() {
+                if let Some((s, _, _, _)) = self.state.as_ref() {
                     let size = s.window.inner_size();
                     let per_point = size.width.max(1) as f64 / f64::from(CANVAS.width);
                     self.cursor = Point::new(
@@ -346,6 +417,13 @@ impl ApplicationHandler for App {
             _ => {}
         }
     }
+}
+
+/// Blocks until the GPU has finished, so the glass pass can be timed.
+fn finish(gl: &sphatik_render::glow::Context) {
+    use sphatik_render::glow::HasContext;
+    // SAFETY: the context is current on this thread.
+    unsafe { gl.finish() };
 }
 
 /// Zoom so the whole 852 pt tall canvas fits in 85% of the monitor height.
@@ -388,7 +466,8 @@ fn main() -> ExitCode {
         eprintln!("sphatik-preview: {e}");
         return ExitCode::FAILURE;
     }
-    if let Some((s, wallpaper, glass)) = app.state.take() {
+    if let Some((s, wallpaper, glass, overlay)) = app.state.take() {
+        overlay.destroy();
         glass.destroy();
         wallpaper.destroy();
         drop(s);
