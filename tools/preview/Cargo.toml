@@ -17,6 +17,7 @@ glutin = "0.32"
 glutin-winit = "0.5"
 png = "0.18"
 raw-window-handle = "0.6"
+sphatik-motion = { version = "0.1.0", path = "../../ui/motion" }
 sphatik-render = { version = "0.1.0", path = "../../render" }
 sphatik-shell = { version = "0.1.0", path = "../../shell" }
 winit = "0.30"

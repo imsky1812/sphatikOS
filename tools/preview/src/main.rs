@@ -21,6 +21,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::Parser;
+use sphatik_motion::{Preset, Spring};
 use sphatik_render::wallpaper::Wall;
 use sphatik_render::{GlassPanel, GlassRenderer, Overlay, PerfGraph, Rect, WallpaperRenderer};
 use sphatik_shell::gesture::{self, Canvas, Hit, Point, ShellContext, TouchTracker};
@@ -52,9 +53,24 @@ struct Options {
 /// The canvas the preview shows: the prototype's 393 x 852 pt screen.
 const CANVAS: Canvas = Canvas::PROTOTYPE;
 
-/// A Regular-glass panel at the first home-widget position (reference §9).
-fn demo_panel() -> GlassPanel {
-    GlassPanel::regular(Rect::new(18.0, 66.0, 171.5, 162.0), 30.0)
+/// The home position of the draggable demo panel (reference §9).
+const PANEL_HOME: Rect = Rect::new(18.0, 66.0, 171.5, 162.0);
+const PANEL_RADIUS: f32 = 30.0;
+
+/// A Regular-glass panel offset from its home position, with the specular
+/// light placed under the pointer.
+fn demo_panel(offset: [f32; 2], light: [f32; 2]) -> GlassPanel {
+    let rect = Rect::new(
+        PANEL_HOME.x + offset[0],
+        PANEL_HOME.y + offset[1],
+        PANEL_HOME.w,
+        PANEL_HOME.h,
+    );
+    GlassPanel::regular(rect, PANEL_RADIUS).with_light(light)
+}
+
+fn point_in(rect: Rect, p: Point) -> bool {
+    p.x >= rect.x && p.x <= rect.right() && p.y >= rect.y && p.y <= rect.bottom()
 }
 
 fn wall_from_name(name: &str) -> Option<Wall> {
@@ -76,6 +92,12 @@ struct App {
     started: Instant,
     touch: Option<TouchTracker>,
     cursor: Point,
+    panel_offset: [f32; 2],
+    dragging_panel: bool,
+    drag_start: [f32; 2],
+    spring_x: Spring,
+    spring_y: Spring,
+    springing: bool,
     result: Result<(), String>,
 }
 
@@ -98,8 +120,28 @@ impl App {
             started: Instant::now(),
             touch: None,
             cursor: Point::default(),
+            panel_offset: [0.0, 0.0],
+            dragging_panel: false,
+            drag_start: [0.0, 0.0],
+            spring_x: Spring::new(0.0, Preset::Bouncy),
+            spring_y: Spring::new(0.0, Preset::Bouncy),
+            springing: false,
             result: Ok(()),
         }
+    }
+
+    /// The panel's specular light, 0..1 across it, from the cursor.
+    fn panel_light(&self) -> [f32; 2] {
+        let rect = Rect::new(
+            PANEL_HOME.x + self.panel_offset[0],
+            PANEL_HOME.y + self.panel_offset[1],
+            PANEL_HOME.w,
+            PANEL_HOME.h,
+        );
+        [
+            ((self.cursor.x - rect.x) / rect.w).clamp(0.0, 1.0),
+            ((self.cursor.y - rect.y) / rect.h).clamp(0.0, 1.0),
+        ]
     }
 
     fn now_ms(&self) -> f64 {
@@ -136,32 +178,42 @@ impl App {
         Ok(())
     }
 
-    /// (Re)renders the wallpaper, and the glass panel over it, at the window
+    /// (Re)renders the wallpaper, then the glass panel over it, at the window
     /// size (or the screenshot size).
     fn render_frame(&mut self) -> Result<(), Box<dyn Error>> {
-        let glass_on = self.glass_on;
         let wall = self.wall;
         let (w, h) = self.target_size();
+        if let Some((_, wallpaper, _, _)) = self.state.as_mut() {
+            wallpaper.render(&wall.build(), CANVAS.width, CANVAS.height, w, h)?;
+        }
+        self.render_glass()
+    }
+
+    /// Re-renders only the glass panel (at its current offset) over the cached
+    /// wallpaper texture. Cheap enough to call every frame while dragging.
+    fn render_glass(&mut self) -> Result<(), Box<dyn Error>> {
+        if !self.glass_on {
+            self.dirty = true;
+            return Ok(());
+        }
+        let (w, h) = self.target_size();
+        let panels = [demo_panel(self.panel_offset, self.panel_light())];
         let util = self.util_gl.as_ref();
         let mut glass_ms = None;
         let Some((_, wallpaper, glass, _)) = self.state.as_mut() else {
             return Ok(());
         };
-        wallpaper.render(&wall.build(), CANVAS.width, CANVAS.height, w, h)?;
-        if glass_on {
-            let texture = wallpaper.texture().ok_or("no wallpaper texture")?;
-            let panels = [demo_panel()];
-            // Time the glass pass with a blocking finish (laptop-indicative;
-            // the real budget is measured on the phone).
-            if let Some(gl) = util {
-                finish(gl);
-                let start = Instant::now();
-                glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
-                finish(gl);
-                glass_ms = Some(start.elapsed().as_secs_f64() as f32 * 1000.0);
-            } else {
-                glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
-            }
+        let texture = wallpaper.texture().ok_or("no wallpaper texture")?;
+        // Time the glass pass with a blocking finish (laptop-indicative; the
+        // real budget is measured on the phone).
+        if let Some(gl) = util {
+            finish(gl);
+            let start = Instant::now();
+            glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
+            finish(gl);
+            glass_ms = Some(start.elapsed().as_secs_f64() as f32 * 1000.0);
+        } else {
+            glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
         }
         self.glass_ms = glass_ms;
         self.dirty = true;
@@ -185,17 +237,33 @@ impl App {
 
     fn redraw(&mut self) -> Result<(), Box<dyn Error>> {
         let overlay_on = self.overlay_on;
-        if !self.dirty && !overlay_on {
+        let animating = self.springing;
+        if !self.dirty && !overlay_on && !animating {
             return Ok(());
         }
-        // Frame interval (wall clock), for the FPS graph.
+        // Frame interval (wall clock), for the FPS graph and the springs.
         let now = Instant::now();
-        if let Some(prev) = self.last_present {
-            self.graph
-                .push(now.duration_since(prev).as_secs_f64() as f32 * 1000.0);
+        let dt = self.last_present.map_or(1.0 / 60.0, |prev| {
+            now.duration_since(prev).as_secs_f64() as f32
+        });
+        if self.last_present.is_some() {
+            self.graph.push(dt * 1000.0);
         }
         self.last_present = Some(now);
 
+        // Advance the panel's spring-back and re-render the glass under it.
+        if self.springing {
+            let x = self.spring_x.step(dt);
+            let y = self.spring_y.step(dt);
+            self.panel_offset = [x, y];
+            if self.spring_x.is_at_rest() && self.spring_y.is_at_rest() {
+                self.panel_offset = [0.0, 0.0];
+                self.springing = false;
+            }
+            let _ = self.render_glass();
+        }
+
+        let overlay_on = self.overlay_on;
         let glass_on = self.glass_on;
         let graph = self.graph;
         let glass_ms = self.glass_ms;
@@ -220,8 +288,8 @@ impl App {
             if glass_on { "on" } else { "off" },
             if overlay_on { "on" } else { "off" },
         ));
-        // Keep redrawing while the overlay is up, for a live graph.
-        if overlay_on {
+        // Keep redrawing while the overlay is up or a spring is running.
+        if overlay_on || self.springing {
             window_state.window.request_redraw();
         }
         Ok(())
@@ -279,35 +347,92 @@ impl App {
         }
     }
 
+    /// Mouse-as-touch: the panel can be dragged and springs back on release;
+    /// otherwise a drag is classified by the gesture recogniser and logged.
     fn pointer(&mut self, pressed: Option<bool>) {
         let now = self.now_ms();
-        match (pressed, self.touch.as_mut()) {
-            (Some(true), _) => self.touch = Some(TouchTracker::begin(self.cursor, now)),
-            (None, Some(t)) => t.move_to(self.cursor, now),
-            (Some(false), Some(t)) => {
-                t.move_to(self.cursor, now);
-                let kind = if t.past_slop() {
-                    gesture::classify(
-                        &ShellContext::default(),
-                        CANVAS,
-                        t.start(),
-                        t.delta(),
-                        Hit::Other,
-                    )
-                } else {
-                    None
-                };
-                eprintln!(
-                    "touch: from ({:.0}, {:.0}) moved ({:.0}, {:.0}) -> {:?}",
-                    t.start().x,
-                    t.start().y,
-                    t.delta().x,
-                    t.delta().y,
-                    kind
+        match pressed {
+            Some(true) => {
+                self.touch = Some(TouchTracker::begin(self.cursor, now));
+                let panel = Rect::new(
+                    PANEL_HOME.x + self.panel_offset[0],
+                    PANEL_HOME.y + self.panel_offset[1],
+                    PANEL_HOME.w,
+                    PANEL_HOME.h,
                 );
-                self.touch = None;
+                if self.glass_on && point_in(panel, self.cursor) {
+                    self.dragging_panel = true;
+                    self.drag_start = self.panel_offset;
+                    self.springing = false;
+                    self.request_frame();
+                }
             }
-            _ => {}
+            None => {
+                let delta = self.touch.as_mut().map(|t| {
+                    t.move_to(self.cursor, now);
+                    t.delta()
+                });
+                if let (true, Some(delta)) = (self.dragging_panel, delta) {
+                    self.panel_offset =
+                        [self.drag_start[0] + delta.x, self.drag_start[1] + delta.y];
+                    let _ = self.render_glass();
+                    self.request_frame();
+                } else if self.glass_on && !self.springing {
+                    // The specular highlight tracks the pointer while it is
+                    // over the panel.
+                    let panel = Rect::new(
+                        PANEL_HOME.x + self.panel_offset[0],
+                        PANEL_HOME.y + self.panel_offset[1],
+                        PANEL_HOME.w,
+                        PANEL_HOME.h,
+                    );
+                    if point_in(panel, self.cursor) {
+                        let _ = self.render_glass();
+                        self.request_frame();
+                    }
+                }
+            }
+            Some(false) => {
+                if let Some(mut t) = self.touch.take() {
+                    t.move_to(self.cursor, now);
+                    if self.dragging_panel {
+                        self.dragging_panel = false;
+                        // Hand the finger velocity (pt/ms -> pt/s) to the spring.
+                        let v = t.velocity();
+                        self.spring_x = Spring::new(self.panel_offset[0], Preset::Bouncy);
+                        self.spring_y = Spring::new(self.panel_offset[1], Preset::Bouncy);
+                        self.spring_x.set_velocity(v.x * 1000.0);
+                        self.spring_y.set_velocity(v.y * 1000.0);
+                        self.spring_x.animate_to(0.0);
+                        self.spring_y.animate_to(0.0);
+                        self.springing = true;
+                        self.request_frame();
+                    } else if t.past_slop() {
+                        let kind = gesture::classify(
+                            &ShellContext::default(),
+                            CANVAS,
+                            t.start(),
+                            t.delta(),
+                            Hit::Other,
+                        );
+                        eprintln!(
+                            "touch: from ({:.0}, {:.0}) moved ({:.0}, {:.0}) -> {:?}",
+                            t.start().x,
+                            t.start().y,
+                            t.delta().x,
+                            t.delta().y,
+                            kind
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Requests a redraw if the window exists.
+    fn request_frame(&self) {
+        if let Some((s, _, _, _)) = self.state.as_ref() {
+            s.window.request_redraw();
         }
     }
 }
