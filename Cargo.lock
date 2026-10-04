@@ -1818,6 +1818,7 @@ dependencies = [
  "glutin-winit",
  "png",
  "raw-window-handle",
+ "sphatik-motion",
  "sphatik-render",
  "sphatik-shell",
  "winit",
