@@ -1,0 +1,41 @@
+name: Deploy showcase to GitHub Pages
+
+# Publishes the interactive Sphatik OS showcase (showcase/index.html) to
+# GitHub Pages. Runs on pushes to main that touch the showcase or this
+# workflow, and can be run by hand.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "showcase/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; let a newer run finish rather than cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload showcase
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: showcase
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
