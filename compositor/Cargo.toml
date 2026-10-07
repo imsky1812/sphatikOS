@@ -7,5 +7,20 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+# The real Linux compositor backend (Smithay winit + GLES). Off by default so
+# the crate builds as a portable stub on Windows and in the aarch64 cross-build
+# (ADR 0008); enabled on the Linux test job and later on the phone.
+winit-backend = ["dep:smithay"]
+
+# Smithay is Linux-only (Wayland, EGL, libinput). Scoped to the Linux target so
+# the dependency is never pulled in on Windows, and optional so it is compiled
+# only when `winit-backend` is on.
+[target.'cfg(target_os = "linux")'.dependencies]
+smithay = { version = "0.7", default-features = false, features = [
+    "backend_winit",
+    "renderer_gl",
+], optional = true }
+
 [lints]
 workspace = true

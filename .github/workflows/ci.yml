@@ -32,7 +32,11 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install compositor backend libs (Smithay winit)
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libegl-dev libgles-dev libgbm-dev
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Also lint the Linux-only compositor backend (off by default; ADR 0008).
+      - run: cargo clippy -p sphatik-comp --features winit-backend --all-targets -- -D warnings
 
   test:
     name: Test
@@ -41,12 +45,32 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install Mesa (software EGL and GLES for golden images)
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libegl-mesa0 libgles2 libgl1-mesa-dri
+      - name: Install Mesa + compositor backend libs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 libegl-mesa0 libgles2 libgl1-mesa-dri \
+            libwayland-dev libxkbcommon-dev libegl-dev libgles-dev libgbm-dev \
+            xvfb xauth libxkbcommon-x11-0 libxcb1 libx11-xcb1 libxcursor1 libxrandr2 libxi6 libxext6
       - run: cargo test --workspace
         env:
           SPHATIK_REQUIRE_GPU_TESTS: "1"
           LIBGL_ALWAYS_SOFTWARE: "1"
+      - name: Compositor 60 fps self-test (WP 2.1, headless under Xvfb)
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          cargo build -p sphatik-comp --features winit-backend
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            ./target/debug/sphatik-comp --selftest 120 | tee /tmp/selftest.txt
+          fps=$(grep -oE -- '-> [0-9.]+ fps' /tmp/selftest.txt | grep -oE '[0-9.]+')
+          dropped=$(grep -oE '[0-9]+ dropped' /tmp/selftest.txt | grep -oE '^[0-9]+')
+          echo "measured fps=$fps dropped=$dropped"
+          awk -v f="$fps" 'BEGIN{ exit !(f>=45 && f<=70) }' \
+            || { echo "::error::frame rate $fps fps out of the 45-70 band"; exit 1; }
+          [ "${dropped:-999}" -le 10 ] \
+            || { echo "::error::$dropped dropped frames (max 10)"; exit 1; }
       - name: Upload rendered images from failed golden tests
         if: failure()
         uses: actions/upload-artifact@v4
