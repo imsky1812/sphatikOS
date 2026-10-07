@@ -8,10 +8,10 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-# The real Linux compositor backend (Smithay winit + GLES). Off by default so
-# the crate builds as a portable stub on Windows and in the aarch64 cross-build
-# (ADR 0008); enabled on the Linux test job and later on the phone.
-winit-backend = ["dep:smithay"]
+# The real Linux compositor backend (Smithay winit + GLES + Wayland server).
+# Off by default so the crate builds as a portable stub on Windows and in the
+# aarch64 cross-build (ADR 0008); enabled on the Linux test job and the phone.
+winit-backend = ["dep:smithay", "dep:png"]
 
 # Smithay is Linux-only (Wayland, EGL, libinput). Scoped to the Linux target so
 # the dependency is never pulled in on Windows, and optional so it is compiled
@@ -19,8 +19,19 @@ winit-backend = ["dep:smithay"]
 [target.'cfg(target_os = "linux")'.dependencies]
 smithay = { version = "0.7", default-features = false, features = [
     "backend_winit",
+    "backend_egl",
     "renderer_gl",
+    "wayland_frontend",
+    "desktop",
 ], optional = true }
+# Writing the composited frame to a PNG for the golden test (--shot mode).
+png = { version = "0.18", optional = true }
+
+# The golden test (compositor/tests/wayland.rs) acts as a Wayland client against
+# the compositor binary; these are Linux-only and used only by that test.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 
 [lints]
 workspace = true
