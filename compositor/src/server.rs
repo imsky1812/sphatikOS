@@ -118,7 +118,6 @@ impl CompositorHandler for State {
         for window in self.space.elements() {
             window.on_commit();
         }
-        eprintln!("server: commit has_buffer={has_buffer}");
 
         // Send the initial configure once the toplevel has made its first
         // commit, per the xdg-shell handshake.
@@ -140,7 +139,6 @@ impl CompositorHandler for State {
         }
 
         if has_buffer && !self.committed {
-            eprintln!("server: client committed a buffer");
             self.committed = true;
         }
 
@@ -160,7 +158,6 @@ impl State {
             state.size = Some((size.0, size.1).into());
         });
         toplevel.send_configure();
-        eprintln!("server: sent initial configure {size:?}");
     }
 }
 
@@ -180,7 +177,6 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        eprintln!("server: new_toplevel");
         let window = Window::new_wayland_window(surface);
         self.space.map_element(window.clone(), (0, 0), false);
         self.window = Some(window);
@@ -325,7 +321,6 @@ fn run_compositor(socket: Option<String>, shot: Option<PathBuf>) -> Result<(), B
 
     let handle = event_loop.handle();
     handle.insert_source(socket_source, move |stream, _, state: &mut State| {
-        eprintln!("server: client connected");
         let _ = state
             .dh
             .insert_client(stream, Arc::new(ClientState::default()));
@@ -408,15 +403,6 @@ fn render_frame(
     let mut done = false;
     if let Some(path) = shot {
         if state.committed {
-            if let Some(window) = &state.window {
-                eprintln!(
-                    "render: output={:?} elements={} bbox={:?} geo={:?}",
-                    size,
-                    state.space.elements().count(),
-                    state.space.element_bbox(window),
-                    window.geometry()
-                );
-            }
             let region = Rectangle::<i32, BufferCoords>::from_size((size.w, size.h).into());
             let mapping = renderer.copy_framebuffer(&fb, region, Fourcc::Abgr8888)?;
             let bytes = renderer.map_texture(&mapping)?.to_vec();
