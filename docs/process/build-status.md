@@ -5,7 +5,7 @@ is left. The authoritative per-work-package detail lives in
 [`CLAUDE.md`](../../CLAUDE.md) ("Current status"); this page is the high-level
 view. Update it at the end of every work package.
 
-**Last updated:** 2026-11-05
+**Last updated:** 2026-11-05 (WP 2.8 merged)
 
 ## Legend
 
@@ -33,12 +33,11 @@ compiled and verified in CI, and will first run on the phone in Stage 3
 Within the agreed scope (Stage 1: 1.1–1.3, Stage 2: 2.1–2.9) — **12 work
 packages**:
 
-- ✅ Complete: **11** (1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.9)
-- 🔄 In progress: **1** (2.8)
+- ✅ Complete: **all 12** (1.1, 1.2, 1.3, 2.1–2.9)
 - 🚩 Remaining gate: **Glass on laptop** (assemble the lock-screen mock-up)
 
-That is **~92%** of the agreed scope done, with WP 2.8 and the end-of-stage gate
-to finish.
+All scoped work packages are done; only the end-of-stage gate remains to close
+Stage 2.
 
 Plus one side deliverable outside the build plan: the **interactive resume
 showcase**, deployed at <https://imsky1812.github.io/sphatikOS/> (PR #12).
@@ -79,14 +78,15 @@ judged in `sphatik-preview` plus a green headless compositor test.
 | 2.5 | Glass v1: refraction, tint, rim, specular, dispersion | ✅ | PR #9 |
 | 2.6 | Spring engine: 4 presets + velocity hand-off | ✅ | PR #3 |
 | 2.7 | Input + gesture recogniser; draggable panel springs back | ✅ | PR #5, #11 |
-| 2.8 | Wayland clients: xdg-shell + linux-dmabuf; app full screen | 🔄 | PR #14 |
+| 2.8 | Wayland clients: xdg-shell + linux-dmabuf; app full screen | ✅ | PR #14 |
 | 2.9 | Debug overlay: FPS, frame graph, glass cost (F12) | ✅ | PR #10 |
 
-**WP 2.8 (in progress, PR #14):** a minimal Wayland server in `sphatik-comp`
+**WP 2.8 (done, PR #14):** a minimal Wayland server in `sphatik-comp`
 (`wl_compositor`, `wl_shm`, `xdg-shell`, `wl_seat`, `wl_output`,
 `zwp_linux_dmabuf_v1`) that composites an external client's window full-screen;
-verified by an in-repo Wayland client test that captures the composited frame,
-run headless under Xvfb in CI. Live dmabuf is deferred to the phone (Stage 3).
+verified by an in-repo Wayland client test that maps a solid-colour toplevel and
+checks the captured frame, run headless under Xvfb in CI. Live dmabuf is
+deferred to the phone (Stage 3).
 
 **After 2.8:** assemble the **Glass on laptop** gate — compose wallpaper +
 clock + a glass panel into a lock-screen mock-up running at 60 fps in
@@ -112,11 +112,10 @@ predecessor's gate (gates are hard).
 
 ## What's left (near term)
 
-1. **Finish WP 2.8** — get PR #14 green (server compiles and the compositing
-   test passes under Xvfb in CI), then merge.
-2. **Glass on laptop gate** — build the lock-screen mock-up (wallpaper + clock +
+1. **Glass on laptop gate** — build the lock-screen mock-up (wallpaper + clock +
    glass panel, 60 fps, prototype-feel swipes) in `sphatik-preview`, with a
-   green headless compositor test. This closes Stage 2.
+   green headless compositor test. This is the only thing left to close
+   Stage 2, now that all nine of its work packages are done.
 
 After the gate, the next agreement with the owner decides whether to continue
 into Stage 3 (phone graphics) or pause.
