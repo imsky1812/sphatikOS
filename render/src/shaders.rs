@@ -405,3 +405,29 @@ in vec4 v_color;
 out vec4 o_color;
 void main() { o_color = v_color; }
 "#;
+
+/// Vertex for text: pixel-space positions (top-left origin) and glyph UVs.
+pub const TEXT_VERTEX: &str = r#"
+in vec2 a_pos;      // pixels, top-left origin
+in vec2 a_uv;
+uniform vec2 u_size;
+out vec2 v_uv;
+void main() {
+    v_uv = a_uv;
+    vec2 ndc = vec2(a_pos.x / u_size.x * 2.0 - 1.0, 1.0 - a_pos.y / u_size.y * 2.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+}
+"#;
+
+/// Fragment for text: a single-channel coverage texture tinted by `u_color`,
+/// output premultiplied to match the overlay's ONE / ONE_MINUS_SRC_ALPHA blend.
+pub const TEXT_FRAGMENT: &str = r#"
+in vec2 v_uv;
+uniform sampler2D u_tex;   // coverage in .r
+uniform vec4 u_color;      // straight-alpha colour
+out vec4 o_color;
+void main() {
+    float a = texture(u_tex, v_uv).r * u_color.a;
+    o_color = vec4(u_color.rgb * a, a);
+}
+"#;
