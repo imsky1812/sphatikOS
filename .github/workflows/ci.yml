@@ -42,7 +42,17 @@ jobs:
             libwayland-dev libxkbcommon-dev libegl-dev libgles-dev libgbm-dev
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # Also lint the Linux-only compositor backend (off by default; ADR 0008).
-      - run: cargo clippy -p sphatik-comp --features winit-backend --all-targets -- -D warnings
+      # On failure, re-emit the errors as GitHub annotations so they are
+      # readable without downloading the full job log.
+      - name: Clippy (compositor backend)
+        run: |
+          if cargo clippy -p sphatik-comp --features winit-backend --all-targets \
+              --message-format=short -- -D warnings 2>&1 | tee /tmp/clippy.txt; then
+            echo "backend clippy clean"
+          else
+            grep -E ': error' /tmp/clippy.txt | sed -E 's/^/::error::/' || true
+            exit 1
+          fi
 
   test:
     name: Test
