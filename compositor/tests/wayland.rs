@@ -106,7 +106,12 @@ fn run_client(runtime: &Path, child: &mut Child, shot: &Path) {
 
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
-        queue.blocking_dispatch(&mut app).expect("dispatch");
+        // A dispatch error means the compositor closed the socket (either after
+        // it captured the frame, or at its own deadline). Stop and check the
+        // PNG rather than panicking, so the assertion reports the real cause.
+        if queue.blocking_dispatch(&mut app).is_err() {
+            break;
+        }
 
         if app.configured && !app.attached {
             let (w, h) = (app.width.max(1), app.height.max(1));

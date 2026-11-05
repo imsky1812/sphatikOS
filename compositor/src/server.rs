@@ -131,7 +131,8 @@ impl CompositorHandler for State {
                 Some(BufferAssignment::NewBuffer(_))
             )
         });
-        if has_buffer {
+        if has_buffer && !self.committed {
+            eprintln!("server: client committed a buffer");
             self.committed = true;
         }
 
@@ -151,6 +152,7 @@ impl State {
             state.size = Some((size.0, size.1).into());
         });
         toplevel.send_configure();
+        eprintln!("server: sent initial configure {size:?}");
     }
 }
 
@@ -170,6 +172,7 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
+        eprintln!("server: new_toplevel");
         let window = Window::new_wayland_window(surface);
         self.space.map_element(window.clone(), (0, 0), false);
         self.window = Some(window);
@@ -314,6 +317,7 @@ fn run_compositor(socket: Option<String>, shot: Option<PathBuf>) -> Result<(), B
 
     let handle = event_loop.handle();
     handle.insert_source(socket_source, move |stream, _, state: &mut State| {
+        eprintln!("server: client connected");
         let _ = state
             .dh
             .insert_client(stream, Arc::new(ClientState::default()));
