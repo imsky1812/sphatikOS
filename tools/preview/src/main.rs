@@ -21,8 +21,11 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::Parser;
+use sphatik_render::text::{self, OUTFIT_EXTRALIGHT, OUTFIT_LIGHT};
 use sphatik_render::wallpaper::Wall;
-use sphatik_render::{GlassPanel, GlassRenderer, Overlay, PerfGraph, Rect, WallpaperRenderer};
+use sphatik_render::{
+    Color, GlassPanel, GlassRenderer, Overlay, PerfGraph, Rect, TextRenderer, WallpaperRenderer,
+};
 use sphatik_shell::gesture::{self, Canvas, Hit, Point, ShellContext, TouchTracker};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -52,9 +55,95 @@ struct Options {
 /// The canvas the preview shows: the prototype's 393 x 852 pt screen.
 const CANVAS: Canvas = Canvas::PROTOTYPE;
 
-/// A Regular-glass panel at the first home-widget position (reference §9).
+/// The lock-screen widget: one Regular-glass card over the aurora, where the
+/// blur and refraction read against the colour.
 fn demo_panel() -> GlassPanel {
-    GlassPanel::regular(Rect::new(18.0, 66.0, 171.5, 162.0), 30.0)
+    GlassPanel::regular(Rect::new(18.0, 556.0, 357.0, 118.0), 30.0)
+}
+
+/// The lock screen's text: a big clock, a date kicker and the unlock hint,
+/// drawn over the wallpaper and glass. Rasterised at the window's scale so the
+/// numerals stay crisp (interim text; the Stage 4 toolkit owns real layout).
+struct LockScreen {
+    clock: TextRenderer,
+    date: TextRenderer,
+    hint: TextRenderer,
+    scale: f32,
+}
+
+impl LockScreen {
+    fn new(gl: &dyn Fn() -> sphatik_render::glow::Context) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            clock: TextRenderer::new(gl())?,
+            date: TextRenderer::new(gl())?,
+            hint: TextRenderer::new(gl())?,
+            scale: 0.0,
+        })
+    }
+
+    /// Rasterises the text for the current scale (points -> pixels). A fixed
+    /// demo time keeps the composition deterministic for the golden test.
+    fn layout(&mut self, canvas_px_w: u32) {
+        let scale = canvas_px_w as f32 / CANVAS.width;
+        if (scale - self.scale).abs() < 0.001 {
+            return;
+        }
+        self.scale = scale;
+        self.clock.set_bitmap(&text::rasterize(
+            OUTFIT_EXTRALIGHT,
+            "9:41",
+            118.0 * scale,
+            -3.5 * scale,
+            true,
+        ));
+        self.date.set_bitmap(&text::rasterize(
+            OUTFIT_LIGHT,
+            "Tuesday, 6 October",
+            17.0 * scale,
+            0.2 * scale,
+            false,
+        ));
+        self.hint.set_bitmap(&text::rasterize(
+            OUTFIT_LIGHT,
+            "Swipe up to open",
+            13.0 * scale,
+            0.4 * scale,
+            false,
+        ));
+    }
+
+    /// Draws the text onto the currently bound framebuffer, sized `w` x `h`.
+    fn draw(&self, w: u32, h: u32) {
+        let scale = w as f32 / CANVAS.width;
+        let centre = |tw: u32| (w as f32 - tw as f32) * 0.5;
+        self.date.draw(
+            w,
+            h,
+            centre(self.date.width()),
+            70.0 * scale,
+            Color::rgba(1.0, 1.0, 1.0, 0.88),
+        );
+        self.clock.draw(
+            w,
+            h,
+            centre(self.clock.width()),
+            104.0 * scale,
+            Color::rgba(1.0, 1.0, 1.0, 0.93),
+        );
+        self.hint.draw(
+            w,
+            h,
+            centre(self.hint.width()),
+            h as f32 - self.hint.height() as f32 - 20.0 * scale,
+            Color::rgba(1.0, 1.0, 1.0, 0.7),
+        );
+    }
+
+    fn destroy(self) {
+        self.clock.destroy();
+        self.date.destroy();
+        self.hint.destroy();
+    }
 }
 
 fn wall_from_name(name: &str) -> Option<Wall> {
@@ -64,6 +153,7 @@ fn wall_from_name(name: &str) -> Option<Wall> {
 struct App {
     options: Options,
     state: Option<(gl::GlWindowState, WallpaperRenderer, GlassRenderer, Overlay)>,
+    lock: Option<LockScreen>,
     util_gl: Option<sphatik_render::glow::Context>,
     wall: Wall,
     glass_on: bool,
@@ -86,6 +176,7 @@ impl App {
         Self {
             options,
             state: None,
+            lock: None,
             util_gl: None,
             wall,
             glass_on: true,
@@ -129,6 +220,7 @@ impl App {
         let (window_state, glow_ctx) = gl::create(event_loop, attributes)?;
         let glass = GlassRenderer::new(window_state.make_glow())?;
         let overlay = Overlay::new(window_state.make_glow())?;
+        self.lock = Some(LockScreen::new(&|| window_state.make_glow())?);
         self.util_gl = Some(window_state.make_glow());
         let wallpaper = WallpaperRenderer::new(glow_ctx)?;
         self.state = Some((window_state, wallpaper, glass, overlay));
@@ -161,6 +253,22 @@ impl App {
                 glass_ms = Some(start.elapsed().as_secs_f64() as f32 * 1000.0);
             } else {
                 glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
+            }
+            // Draw the lock-screen text onto the glass scene, so it shows in
+            // the window and in screenshots.
+            if let (Some(lock), Some(gl), Some(fbo)) =
+                (self.lock.as_mut(), util, glass.scene_framebuffer())
+            {
+                use sphatik_render::glow::HasContext;
+                lock.layout(w);
+                // SAFETY: the context is current; `fbo` is the live scene FBO.
+                unsafe {
+                    gl.bind_framebuffer(sphatik_render::glow::FRAMEBUFFER, Some(fbo));
+                    gl.viewport(0, 0, w as i32, h as i32);
+                }
+                lock.draw(w, h);
+                // SAFETY: as above.
+                unsafe { gl.bind_framebuffer(sphatik_render::glow::FRAMEBUFFER, None) };
             }
         }
         self.glass_ms = glass_ms;
@@ -465,6 +573,9 @@ fn main() -> ExitCode {
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("sphatik-preview: {e}");
         return ExitCode::FAILURE;
+    }
+    if let Some(lock) = app.lock.take() {
+        lock.destroy();
     }
     if let Some((s, wallpaper, glass, overlay)) = app.state.take() {
         overlay.destroy();
