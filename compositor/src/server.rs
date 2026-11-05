@@ -41,7 +41,7 @@ use smithay::reexports::wayland_server::backend::{ClientData, ClientId, Disconne
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{Client, Display, DisplayHandle, Resource};
+use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
 use smithay::utils::{Buffer as BufferCoords, Rectangle, Serial, Transform};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
@@ -113,6 +113,11 @@ impl CompositorHandler for State {
             )
         });
         on_commit_buffer_handler::<Self>(surface);
+        // Let each mapped window refresh its cached geometry from the new
+        // commit, or it renders as empty.
+        for window in self.space.elements() {
+            window.on_commit();
+        }
         eprintln!("server: commit has_buffer={has_buffer}");
 
         // Send the initial configure once the toplevel has made its first
@@ -405,11 +410,11 @@ fn render_frame(
         if state.committed {
             if let Some(window) = &state.window {
                 eprintln!(
-                    "render: output={:?} elements={} mapped={} bbox={:?}",
+                    "render: output={:?} elements={} bbox={:?} geo={:?}",
                     size,
                     state.space.elements().count(),
-                    window.is_mapped(),
-                    state.space.element_bbox(window)
+                    state.space.element_bbox(window),
+                    window.geometry()
                 );
             }
             let region = Rectangle::<i32, BufferCoords>::from_size((size.w, size.h).into());
