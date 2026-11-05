@@ -100,7 +100,20 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        // Read the attached buffer before `on_commit_buffer_handler` consumes
+        // the pending state.
+        let has_buffer = with_states(surface, |states| {
+            matches!(
+                states
+                    .cached_state
+                    .get::<SurfaceAttributes>()
+                    .current()
+                    .buffer,
+                Some(BufferAssignment::NewBuffer(_))
+            )
+        });
         on_commit_buffer_handler::<Self>(surface);
+        eprintln!("server: commit has_buffer={has_buffer}");
 
         // Send the initial configure once the toplevel has made its first
         // commit, per the xdg-shell handshake.
@@ -121,16 +134,6 @@ impl CompositorHandler for State {
             }
         }
 
-        let has_buffer = with_states(surface, |states| {
-            matches!(
-                states
-                    .cached_state
-                    .get::<SurfaceAttributes>()
-                    .current()
-                    .buffer,
-                Some(BufferAssignment::NewBuffer(_))
-            )
-        });
         if has_buffer && !self.committed {
             eprintln!("server: client committed a buffer");
             self.committed = true;
