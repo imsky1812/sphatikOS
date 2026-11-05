@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{
-    wl_buffer::WlBuffer, wl_compositor::WlCompositor, wl_registry::WlRegistry, wl_shm,
+    wl_buffer::WlBuffer, wl_compositor::WlCompositor, wl_registry, wl_registry::WlRegistry, wl_shm,
     wl_shm::WlShm, wl_shm_pool::WlShmPool, wl_surface::WlSurface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
@@ -172,7 +172,8 @@ fn set_mode_700(path: &Path) {
 
 /// Asserts the centre pixel of the captured RGBA PNG matches `color`.
 fn assert_center_is_color(path: &Path, color: (u8, u8, u8)) {
-    let decoder = png::Decoder::new(std::fs::File::open(path).expect("open png"));
+    let file = std::io::BufReader::new(std::fs::File::open(path).expect("open png"));
+    let decoder = png::Decoder::new(file);
     let mut reader = decoder.read_info().expect("png info");
     let mut buf = vec![0; reader.output_buffer_size().expect("png size")];
     let info = reader.next_frame(&mut buf).expect("png frame");

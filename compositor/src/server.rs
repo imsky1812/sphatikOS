@@ -49,7 +49,7 @@ use smithay::wayland::compositor::{
     SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
-use smithay::wayland::output::OutputManagerState;
+use smithay::wayland::output::{OutputHandler, OutputManagerState};
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
@@ -202,6 +202,8 @@ impl SeatHandler for State {
     fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {}
 }
 
+impl OutputHandler for State {}
+
 impl DmabufHandler for State {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
         &mut self.dmabuf
@@ -337,6 +339,7 @@ fn run_compositor(socket: Option<String>, shot: Option<PathBuf>) -> Result<(), B
 
     // The frame timer: pump winit, composite, present, and (for --shot)
     // capture the first client frame.
+    let want_shot = shot.is_some();
     let frame = Timer::immediate();
     handle.insert_source(frame, move |_, _, state: &mut State| {
         let mut close = false;
@@ -361,7 +364,7 @@ fn run_compositor(socket: Option<String>, shot: Option<PathBuf>) -> Result<(), B
 
     event_loop.run(None, &mut state, |_| {})?;
 
-    if shot.is_some() && !state.committed {
+    if want_shot && !state.committed {
         return Err("no client committed a frame before the deadline".into());
     }
     Ok(())
