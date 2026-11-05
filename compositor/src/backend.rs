@@ -7,8 +7,8 @@
 //! before reporting the measured cadence and exiting.
 //!
 //! This module is compiled only on Linux with the `winit-backend` feature
-//! (ADR 0008). It draws a plain tinted clear for now; compositing real
-//! surfaces arrives in WP 2.8 and the shell in the Glass-on-laptop gate.
+//! (ADR 0008). It paces a plain tinted clear to measure the frame clock; the
+//! Wayland server that composites real surfaces lives in [`crate::server`].
 
 use std::error::Error;
 use std::time::{Duration, Instant};
@@ -21,46 +21,18 @@ use smithay::utils::{Rectangle, Transform};
 
 use crate::frame::FrameClock;
 
-/// How long to drive the loop.
-#[derive(Clone, Copy)]
-enum Limit {
-    /// Run until the window is closed.
-    UntilClosed,
-    /// Stop after this many rendered frames (CI self-test).
-    Frames(u64),
-}
-
-/// Runs the compositor window until it is closed.
-pub fn run() -> Result<(), Box<dyn Error>> {
-    drive(Limit::UntilClosed, 60.0).map(|_| ())
-}
-
-/// Runs `frames` frames of the real windowed loop and returns the measured
-/// frame rate and dropped-frame count.
-pub fn selftest(frames: u64, fps: f64) -> Result<(f64, u64), Box<dyn Error>> {
-    drive(Limit::Frames(frames), fps)
-}
-
 /// Frames rendered before measurement starts, so first-frame window and GL
 /// setup costs do not count as dropped frames in the self-test.
 const WARMUP_FRAMES: u64 = 24;
 
-/// Opens the winit window, warms up, then runs the paced render loop and
-/// returns the steady-state cadence.
-fn drive(limit: Limit, fps: f64) -> Result<(f64, u64), Box<dyn Error>> {
+/// Runs `frames` frames of the real windowed loop and returns the measured
+/// frame rate and dropped-frame count (WP 2.1). Warms up first so first-frame
+/// setup is not counted as dropped.
+pub fn selftest(frames: u64, fps: f64) -> Result<(f64, u64), Box<dyn Error>> {
     let (mut backend, mut winit_loop) =
         winit::init::<GlesRenderer>().map_err(|e| format!("winit backend init failed: {e}"))?;
-
-    // Warm up only for a bounded self-test; `run` keeps going regardless.
-    if let Limit::Frames(_) = limit {
-        render_loop(
-            &mut backend,
-            &mut winit_loop,
-            Limit::Frames(WARMUP_FRAMES),
-            fps,
-        )?;
-    }
-    render_loop(&mut backend, &mut winit_loop, limit, fps)
+    render_loop(&mut backend, &mut winit_loop, WARMUP_FRAMES, fps)?;
+    render_loop(&mut backend, &mut winit_loop, frames, fps)
 }
 
 /// Pumps winit events and draws paced frames until the limit is reached or the
@@ -68,7 +40,7 @@ fn drive(limit: Limit, fps: f64) -> Result<(f64, u64), Box<dyn Error>> {
 fn render_loop(
     backend: &mut winit::WinitGraphicsBackend<GlesRenderer>,
     winit_loop: &mut winit::WinitEventLoop,
-    limit: Limit,
+    frames: u64,
     fps: f64,
 ) -> Result<(f64, u64), Box<dyn Error>> {
     let mut clock = FrameClock::new(fps);
@@ -95,10 +67,8 @@ fn render_loop(
         if tick.render {
             render_frame(backend, tint)?;
             tint = (tint + 0.01) % 1.0;
-            if let Limit::Frames(n) = limit {
-                if clock.frames() >= n {
-                    running = false;
-                }
+            if clock.frames() >= frames {
+                running = false;
             }
         } else {
             let wait = clock.time_until_next(start.elapsed().as_secs_f64());

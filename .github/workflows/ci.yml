@@ -26,6 +26,7 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -33,22 +34,40 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install compositor backend libs (Smithay winit)
-        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libegl-dev libgles-dev libgbm-dev
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
+            libwayland-dev libxkbcommon-dev libegl-dev libgles-dev libgbm-dev
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # Also lint the Linux-only compositor backend (off by default; ADR 0008).
-      - run: cargo clippy -p sphatik-comp --features winit-backend --all-targets -- -D warnings
+      # On failure, re-emit the errors as GitHub annotations so they are
+      # readable without downloading the full job log.
+      - name: Clippy (compositor backend)
+        run: |
+          if cargo clippy -p sphatik-comp --features winit-backend --all-targets \
+              --message-format=short -- -D warnings 2>&1 | tee /tmp/clippy.txt; then
+            echo "backend clippy clean"
+          else
+            grep -E ': error' /tmp/clippy.txt | sed -E 's/^/::error::/' || true
+            exit 1
+          fi
 
   test:
     name: Test
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Mesa + compositor backend libs
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
             libegl1 libegl-mesa0 libgles2 libgl1-mesa-dri \
             libwayland-dev libxkbcommon-dev libegl-dev libgles-dev libgbm-dev \
             xvfb xauth libxkbcommon-x11-0 libxcb1 libx11-xcb1 libxcursor1 libxrandr2 libxi6 libxext6
@@ -71,6 +90,13 @@ jobs:
             || { echo "::error::frame rate $fps fps out of the 45-70 band"; exit 1; }
           [ "${dropped:-999}" -le 10 ] \
             || { echo "::error::$dropped dropped frames (max 10)"; exit 1; }
+      - name: Compositor composites a client window (WP 2.8, headless under Xvfb)
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            cargo test -p sphatik-comp --features winit-backend --test wayland -- --nocapture
       - name: Upload rendered images from failed golden tests
         if: failure()
         uses: actions/upload-artifact@v4

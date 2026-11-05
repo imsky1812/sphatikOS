@@ -13,6 +13,8 @@ mod frame;
 
 #[cfg(all(target_os = "linux", feature = "winit-backend"))]
 mod backend;
+#[cfg(all(target_os = "linux", feature = "winit-backend"))]
+mod server;
 
 /// One-line identification printed at start-up.
 fn banner() -> String {
@@ -20,15 +22,22 @@ fn banner() -> String {
 }
 
 /// What the command line asked the binary to do.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Mode {
     /// Print the banner and exit (default off-device, and when no window is
     /// available).
     Banner,
     /// Run `frames` frames of the render loop, report the cadence, and exit.
     SelfTest { frames: u64, fps: f64 },
-    /// Run the compositor until closed (Linux + `winit-backend` only).
+    /// Run the Wayland compositor until closed (Linux + `winit-backend` only).
     Run,
+    /// Run the compositor, capture the first client frame to a PNG, and exit
+    /// (the golden test; Linux + `winit-backend` only). `socket` names the
+    /// Wayland socket the client connects to.
+    Shot {
+        path: String,
+        socket: Option<String>,
+    },
 }
 
 /// Parses the process arguments into a [`Mode`]. Unknown flags are ignored so
@@ -38,6 +47,8 @@ fn parse_mode(args: &[String]) -> Mode {
     let mut fps = 60.0;
     let mut selftest: Option<u64> = None;
     let mut run = false;
+    let mut shot: Option<String> = None;
+    let mut socket: Option<String> = None;
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--selftest" => {
@@ -62,11 +73,23 @@ fn parse_mode(args: &[String]) -> Mode {
                 }
             }
             "--run" => run = true,
+            "--shot" => {
+                if let Some(path) = iter.next() {
+                    shot = Some(path.clone());
+                }
+            }
+            "--socket" => {
+                if let Some(name) = iter.next() {
+                    socket = Some(name.clone());
+                }
+            }
             _ => {}
         }
     }
     if let Some(frames) = selftest {
         Mode::SelfTest { frames, fps }
+    } else if let Some(path) = shot {
+        Mode::Shot { path, socket }
     } else if run {
         Mode::Run
     } else {
@@ -131,7 +154,7 @@ fn main() {
             println!("{}", banner());
             #[cfg(all(target_os = "linux", feature = "winit-backend"))]
             {
-                if let Err(e) = backend::run() {
+                if let Err(e) = server::run() {
                     eprintln!("sphatik-comp: {e}");
                     std::process::exit(1);
                 }
@@ -139,6 +162,22 @@ fn main() {
             #[cfg(not(all(target_os = "linux", feature = "winit-backend")))]
             {
                 eprintln!("sphatik-comp: --run needs the winit-backend feature on Linux");
+                std::process::exit(2);
+            }
+        }
+        Mode::Shot { path, socket } => {
+            println!("{}", banner());
+            #[cfg(all(target_os = "linux", feature = "winit-backend"))]
+            {
+                if let Err(e) = server::shot(path.into(), socket) {
+                    eprintln!("sphatik-comp: {e}");
+                    std::process::exit(1);
+                }
+            }
+            #[cfg(not(all(target_os = "linux", feature = "winit-backend")))]
+            {
+                let _ = (path, socket);
+                eprintln!("sphatik-comp: --shot needs the winit-backend feature on Linux");
                 std::process::exit(2);
             }
         }
@@ -189,6 +228,18 @@ mod tests {
     #[test]
     fn run_flag_selects_run_mode() {
         assert_eq!(parse_mode(&["--run".to_string()]), Mode::Run);
+    }
+
+    #[test]
+    fn shot_flag_parses_path_and_socket() {
+        let args = ["--shot", "out.png", "--socket", "sphatik-ci"].map(String::from);
+        assert_eq!(
+            parse_mode(&args),
+            Mode::Shot {
+                path: "out.png".to_string(),
+                socket: Some("sphatik-ci".to_string()),
+            }
+        );
     }
 
     #[cfg(not(all(target_os = "linux", feature = "winit-backend")))]
