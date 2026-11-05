@@ -403,6 +403,15 @@ fn render_frame(
     let mut done = false;
     if let Some(path) = shot {
         if state.committed {
+            if let Some(window) = &state.window {
+                eprintln!(
+                    "render: output={:?} elements={} mapped={} bbox={:?}",
+                    size,
+                    state.space.elements().count(),
+                    window.is_mapped(),
+                    state.space.element_bbox(window)
+                );
+            }
             let region = Rectangle::<i32, BufferCoords>::from_size((size.w, size.h).into());
             let mapping = renderer.copy_framebuffer(&fb, region, Fourcc::Abgr8888)?;
             let bytes = renderer.map_texture(&mapping)?.to_vec();
