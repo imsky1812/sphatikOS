@@ -176,7 +176,11 @@ fn assert_center_is_color(path: &Path, color: (u8, u8, u8)) {
     let mut reader = decoder.read_info().expect("png info");
     let mut buf = vec![0; reader.output_buffer_size().expect("png size")];
     let info = reader.next_frame(&mut buf).expect("png frame");
-    assert_eq!(info.color_type, png::ColorType::Rgba, "expected RGBA output");
+    assert_eq!(
+        info.color_type,
+        png::ColorType::Rgba,
+        "expected RGBA output"
+    );
 
     let (w, h) = (info.width as usize, info.height as usize);
     let (cx, cy) = (w / 2, h / 2);
