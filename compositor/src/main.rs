@@ -10,9 +10,12 @@
 //! platform-independent and always compiled.
 
 mod frame;
+mod mode;
 
 #[cfg(all(target_os = "linux", feature = "winit-backend"))]
 mod backend;
+#[cfg(all(target_os = "linux", feature = "drm-backend"))]
+mod drm;
 #[cfg(all(target_os = "linux", feature = "winit-backend"))]
 mod server;
 
@@ -152,16 +155,33 @@ fn main() {
         }
         Mode::Run => {
             println!("{}", banner());
-            #[cfg(all(target_os = "linux", feature = "winit-backend"))]
+            // The phone uses the DRM backend; the laptop uses the winit server.
+            #[cfg(all(target_os = "linux", feature = "drm-backend"))]
+            {
+                if let Err(e) = drm::run() {
+                    eprintln!("sphatik-comp: {e}");
+                    std::process::exit(1);
+                }
+            }
+            #[cfg(all(
+                target_os = "linux",
+                feature = "winit-backend",
+                not(feature = "drm-backend")
+            ))]
             {
                 if let Err(e) = server::run() {
                     eprintln!("sphatik-comp: {e}");
                     std::process::exit(1);
                 }
             }
-            #[cfg(not(all(target_os = "linux", feature = "winit-backend")))]
+            #[cfg(not(all(
+                target_os = "linux",
+                any(feature = "winit-backend", feature = "drm-backend")
+            )))]
             {
-                eprintln!("sphatik-comp: --run needs the winit-backend feature on Linux");
+                eprintln!(
+                    "sphatik-comp: --run needs the winit-backend or drm-backend feature on Linux"
+                );
                 std::process::exit(2);
             }
         }

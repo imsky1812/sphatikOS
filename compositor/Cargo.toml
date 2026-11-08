@@ -13,6 +13,19 @@ authors.workspace = true
 # aarch64 cross-build (ADR 0008); enabled on the Linux test job and the phone.
 winit-backend = ["dep:smithay", "dep:png"]
 
+# The phone compositor backend (WP 3.1): DRM/KMS + GBM + EGL + libinput, with
+# a libseat session. Off by default and Linux-only (ADR 0008); compiled in CI,
+# first run on the phone. Layers the DRM features onto the shared Smithay dep.
+drm-backend = [
+    "dep:smithay",
+    "dep:png",
+    "smithay/backend_drm",
+    "smithay/backend_gbm",
+    "smithay/backend_libinput",
+    "smithay/backend_session_libseat",
+    "smithay/backend_udev",
+]
+
 # Smithay is Linux-only (Wayland, EGL, libinput). Scoped to the Linux target so
 # the dependency is never pulled in on Windows, and optional so it is compiled
 # only when `winit-backend` is on.

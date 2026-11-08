@@ -33,26 +33,30 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install compositor backend libs (Smithay winit)
+      - name: Install compositor backend libs (Smithay winit + DRM)
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            libwayland-dev libxkbcommon-dev libegl-dev libgles-dev libgbm-dev
+            libwayland-dev libxkbcommon-dev libegl-dev libgles-dev libgbm-dev \
+            libdrm-dev libinput-dev libseat-dev libudev-dev
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      # Also lint the Linux-only compositor backend (off by default; ADR 0008).
+      # Also lint the Linux-only compositor backends (off by default; ADR 0008).
       # On failure, re-emit the errors as GitHub annotations so they are
       # readable without downloading the full job log.
-      - name: Clippy (compositor backend)
+      - name: Clippy (compositor backends)
         run: |
-          if cargo clippy -p sphatik-comp --features winit-backend --all-targets \
-              --message-format=short -- -D warnings 2>&1 | tee /tmp/clippy.txt; then
-            echo "backend clippy clean"
-          else
-            grep -E ': error' /tmp/clippy.txt | sed -E 's/^/::error::/' || true
-            exit 1
-          fi
+          lint() {
+            if cargo clippy -p sphatik-comp --features "$1" --all-targets \
+                --message-format=short -- -D warnings 2>&1 | tee /tmp/clippy.txt; then
+              echo "$1 clippy clean"
+            else
+              grep -E ': error' /tmp/clippy.txt | sed -E "s/^/::error::[$1] /" || true
+              return 1
+            fi
+          }
+          lint winit-backend && lint drm-backend
 
   test:
     name: Test
