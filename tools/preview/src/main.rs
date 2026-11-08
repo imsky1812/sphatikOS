@@ -12,6 +12,7 @@
 //! drawn only when something changes; the title bar counts drawn frames.
 
 mod gl;
+mod home;
 
 use std::error::Error;
 use std::fs::File;
@@ -25,8 +26,11 @@ use sphatik_motion::{Preset, Spring};
 use sphatik_render::text::{self, OUTFIT_EXTRALIGHT, OUTFIT_LIGHT};
 use sphatik_render::wallpaper::Wall;
 use sphatik_render::{
-    Color, GlassPanel, GlassRenderer, Overlay, PerfGraph, Rect, TextRenderer, WallpaperRenderer,
+    Color, GlassPanel, GlassRenderer, Overlay, PerfGraph, Rect, Renderer, TextRenderer,
+    WallpaperRenderer,
 };
+
+use crate::home::Home;
 use sphatik_shell::gesture::{
     self, Canvas, Gesture, Hit, LiftOff, Point, ShellContext, TouchTracker,
 };
@@ -168,6 +172,9 @@ struct App {
     options: Options,
     state: Option<(gl::GlWindowState, WallpaperRenderer, GlassRenderer, Overlay)>,
     lock: Option<LockScreen>,
+    home: Option<Home>,
+    shapes: Option<Renderer>,
+    unlocked: bool,
     util_gl: Option<sphatik_render::glow::Context>,
     wall: Wall,
     glass_on: bool,
@@ -196,6 +203,9 @@ impl App {
             options,
             state: None,
             lock: None,
+            home: None,
+            shapes: None,
+            unlocked: false,
             util_gl: None,
             wall,
             glass_on: true,
@@ -245,10 +255,14 @@ impl App {
         let glass = GlassRenderer::new(window_state.make_glow())?;
         let overlay = Overlay::new(window_state.make_glow())?;
         self.lock = Some(LockScreen::new(&|| window_state.make_glow())?);
+        self.home = Some(Home::new(&|| window_state.make_glow())?);
+        self.shapes = Some(Renderer::new(window_state.make_glow())?);
         self.util_gl = Some(window_state.make_glow());
         let wallpaper = WallpaperRenderer::new(glow_ctx)?;
         self.state = Some((window_state, wallpaper, glass, overlay));
-        self.unlock.jump_to(self.options.unlock.clamp(0.0, 1.0));
+        let start_unlock = self.options.unlock.clamp(0.0, 1.0);
+        self.unlock.jump_to(start_unlock);
+        self.unlocked = start_unlock >= 0.5;
         self.render_frame()?;
         Ok(())
     }
@@ -282,34 +296,50 @@ impl App {
         }
         if glass_on {
             let texture = wallpaper.texture().ok_or("no wallpaper texture")?;
-            // The glass widget rides up with the lock layer and is dropped once
-            // the layer has mostly faded (the glass has no partial alpha).
-            let widget = [lock_panel(rise)];
-            let panels: &[GlassPanel] = if opacity > 0.25 { &widget } else { &[] };
+            let unlocked = self.unlocked;
+            // The home's glass panels when unlocked, else the lock widget,
+            // which rides up with the lock layer and is dropped once it has
+            // mostly faded (the glass has no partial alpha).
+            let panels: Vec<GlassPanel> = if unlocked {
+                self.home
+                    .as_ref()
+                    .map(Home::glass_panels)
+                    .unwrap_or_default()
+            } else if opacity > 0.25 {
+                vec![lock_panel(rise)]
+            } else {
+                Vec::new()
+            };
             // Time the glass pass with a blocking finish (laptop-indicative;
             // the real budget is measured on the phone).
             if let Some(gl) = util {
                 finish(gl);
                 let start = Instant::now();
-                glass.render(texture, CANVAS.width, CANVAS.height, w, h, panels)?;
+                glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
                 finish(gl);
                 glass_ms = Some(start.elapsed().as_secs_f64() as f32 * 1000.0);
             } else {
-                glass.render(texture, CANVAS.width, CANVAS.height, w, h, panels)?;
+                glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
             }
-            // Draw the lock-screen text onto the glass scene, so it shows in
-            // the window and in screenshots.
-            if let (Some(lock), Some(gl), Some(fbo)) =
-                (self.lock.as_mut(), util, glass.scene_framebuffer())
-            {
+            // Draw the shell layer (shapes + text) onto the glass scene, so it
+            // shows in the window and in screenshots.
+            if let (Some(gl), Some(fbo)) = (util, glass.scene_framebuffer()) {
                 use sphatik_render::glow::HasContext;
-                lock.layout(w);
                 // SAFETY: the context is current; `fbo` is the live scene FBO.
                 unsafe {
                     gl.bind_framebuffer(sphatik_render::glow::FRAMEBUFFER, Some(fbo));
                     gl.viewport(0, 0, w as i32, h as i32);
                 }
-                lock.draw(w, h, rise, opacity);
+                if unlocked {
+                    if let (Some(home), Some(shapes)) = (self.home.as_mut(), self.shapes.as_ref()) {
+                        home.layout(w);
+                        shapes.draw_onto(&home.shapes(), CANVAS.width, CANVAS.height, w);
+                        home.draw_text(w, h, 1.0);
+                    }
+                } else if let Some(lock) = self.lock.as_mut() {
+                    lock.layout(w);
+                    lock.draw(w, h, rise, opacity);
+                }
                 // SAFETY: as above.
                 unsafe { gl.bind_framebuffer(sphatik_render::glow::FRAMEBUFFER, None) };
             }
@@ -346,8 +376,10 @@ impl App {
             self.unlock.step(dt.min(0.034));
             if self.unlock.is_at_rest() {
                 self.animating = false;
-                // Re-arm the demo: settling unlocked snaps back to locked.
+                // Settling past halfway reveals the home screen; press L to
+                // lock again.
                 if self.unlock.value() > 0.5 {
+                    self.unlocked = true;
                     self.unlock.jump_to(0.0);
                 }
             }
@@ -475,7 +507,8 @@ impl App {
                         return false;
                     };
                     t.move_to(self.cursor, now);
-                    if !self.unlocking
+                    if !self.unlocked
+                        && !self.unlocking
                         && t.past_slop()
                         && matches!(
                             gesture::classify(
@@ -621,6 +654,18 @@ impl ApplicationHandler for App {
                         }
                         None
                     }
+                    KeyCode::KeyL => {
+                        // Lock again: back to the lock screen.
+                        self.unlocked = false;
+                        self.unlocking = false;
+                        self.animating = false;
+                        self.unlock.jump_to(0.0);
+                        if let Err(e) = self.render_frame() {
+                            eprintln!("sphatik-preview: {e}");
+                        }
+                        self.request_redraw();
+                        None
+                    }
                     KeyCode::F12 => {
                         self.overlay_on = !self.overlay_on;
                         self.dirty = true;
@@ -716,6 +761,12 @@ fn main() -> ExitCode {
     }
     if let Some(lock) = app.lock.take() {
         lock.destroy();
+    }
+    if let Some(home) = app.home.take() {
+        home.destroy();
+    }
+    if let Some(shapes) = app.shapes.take() {
+        shapes.destroy();
     }
     if let Some((s, wallpaper, glass, overlay)) = app.state.take() {
         overlay.destroy();
