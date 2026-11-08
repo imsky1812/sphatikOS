@@ -239,6 +239,41 @@ impl Renderer {
         }
     }
 
+    /// Draws `shapes` onto the currently bound framebuffer (the caller binds
+    /// it and sets the viewport), for a `canvas_w` x `canvas_h` logical canvas
+    /// rendered `px_width` pixels wide. Blends over what is there and does not
+    /// clear — for compositing UI shapes onto another layer (e.g. the shell
+    /// over the glass scene). No off-screen target is needed.
+    pub fn draw_onto(&self, shapes: &[Shape], canvas_w: f32, canvas_h: f32, px_width: u32) {
+        if shapes.is_empty() || canvas_w <= 0.0 {
+            return;
+        }
+        let scale = px_width as f32 / canvas_w;
+        let gl = &self.gl;
+        let u = &self.uniforms;
+        // SAFETY: the context is current (documented precondition); the
+        // program, VAO and uniforms were created on it and are still alive, and
+        // the caller has bound the target framebuffer and set the viewport.
+        unsafe {
+            gl.enable(glow::BLEND);
+            gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+            gl.use_program(Some(self.program));
+            gl.bind_vertex_array(Some(self.vao));
+            gl.uniform_2_f32(u.canvas.as_ref(), canvas_w, canvas_h);
+            gl.uniform_1_f32(u.scale.as_ref(), scale);
+            for shape in shapes {
+                let r = shape.rect;
+                gl.uniform_4_f32(u.rect.as_ref(), r.x, r.y, r.w, r.h);
+                gl.uniform_1_f32(u.radius.as_ref(), shape.radius.max(0.0));
+                gl.uniform_1_f32(u.opacity.as_ref(), shape.opacity.clamp(0.0, 1.0));
+                set_paint(gl, u, &shape.paint);
+                gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+            }
+            gl.bind_vertex_array(None);
+            gl.disable(glow::BLEND);
+        }
+    }
+
     /// Copies the scene target to the default framebuffer (the window),
     /// scaling it to `width` x `height` pixels. The host then swaps buffers.
     pub fn present(&self, width: u32, height: u32) {
