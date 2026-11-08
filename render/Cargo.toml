@@ -13,6 +13,9 @@ workspace = true
 [dependencies]
 glow = "0.18.0"
 lyon = "1.0.19"
+# Pure-Rust glyph rasteriser for the lock-screen clock (interim; the Stage 4
+# toolkit brings the full cosmic-text stack).
+ab_glyph = "0.2"
 
 [dev-dependencies]
 khronos-egl = { version = "6.0.0", features = ["dynamic"] }

@@ -21,9 +21,15 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::Parser;
+use sphatik_motion::{Preset, Spring};
+use sphatik_render::text::{self, OUTFIT_EXTRALIGHT, OUTFIT_LIGHT};
 use sphatik_render::wallpaper::Wall;
-use sphatik_render::{GlassPanel, GlassRenderer, Overlay, PerfGraph, Rect, WallpaperRenderer};
-use sphatik_shell::gesture::{self, Canvas, Hit, Point, ShellContext, TouchTracker};
+use sphatik_render::{
+    Color, GlassPanel, GlassRenderer, Overlay, PerfGraph, Rect, TextRenderer, WallpaperRenderer,
+};
+use sphatik_shell::gesture::{
+    self, Canvas, Gesture, Hit, LiftOff, Point, ShellContext, TouchTracker,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -47,14 +53,111 @@ struct Options {
     /// Pixels per point for --screenshot (2.75 matches the phone).
     #[arg(long, default_value_t = 1.0)]
     scale: f32,
+    /// Start the lock screen at this unlock progress (0 locked, 1 unlocked);
+    /// mainly for screenshots of the mid-unlock state.
+    #[arg(long, default_value_t = 0.0)]
+    unlock: f32,
 }
 
 /// The canvas the preview shows: the prototype's 393 x 852 pt screen.
 const CANVAS: Canvas = Canvas::PROTOTYPE;
 
-/// A Regular-glass panel at the first home-widget position (reference §9).
-fn demo_panel() -> GlassPanel {
-    GlassPanel::regular(Rect::new(18.0, 66.0, 171.5, 162.0), 30.0)
+/// The lock-screen widget: one Regular-glass card over the aurora, where the
+/// blur and refraction read against the colour. `rise` lifts it with the lock
+/// layer during unlock.
+fn lock_panel(rise: f32) -> GlassPanel {
+    GlassPanel::regular(Rect::new(18.0, 556.0 - rise, 357.0, 118.0), 30.0)
+}
+
+/// The lock screen's text: a big clock, a date kicker and the unlock hint,
+/// drawn over the wallpaper and glass. Rasterised at the window's scale so the
+/// numerals stay crisp (interim text; the Stage 4 toolkit owns real layout).
+struct LockScreen {
+    clock: TextRenderer,
+    date: TextRenderer,
+    hint: TextRenderer,
+    scale: f32,
+}
+
+impl LockScreen {
+    fn new(gl: &dyn Fn() -> sphatik_render::glow::Context) -> Result<Self, Box<dyn Error>> {
+        Ok(Self {
+            clock: TextRenderer::new(gl())?,
+            date: TextRenderer::new(gl())?,
+            hint: TextRenderer::new(gl())?,
+            scale: 0.0,
+        })
+    }
+
+    /// Rasterises the text for the current scale (points -> pixels). A fixed
+    /// demo time keeps the composition deterministic for the golden test.
+    fn layout(&mut self, canvas_px_w: u32) {
+        let scale = canvas_px_w as f32 / CANVAS.width;
+        if (scale - self.scale).abs() < 0.001 {
+            return;
+        }
+        self.scale = scale;
+        self.clock.set_bitmap(&text::rasterize(
+            OUTFIT_EXTRALIGHT,
+            "9:41",
+            118.0 * scale,
+            -3.5 * scale,
+            true,
+        ));
+        self.date.set_bitmap(&text::rasterize(
+            OUTFIT_LIGHT,
+            "Tuesday, 6 October",
+            17.0 * scale,
+            0.2 * scale,
+            false,
+        ));
+        self.hint.set_bitmap(&text::rasterize(
+            OUTFIT_LIGHT,
+            "Swipe up to open",
+            13.0 * scale,
+            0.4 * scale,
+            false,
+        ));
+    }
+
+    /// Draws the text onto the currently bound framebuffer, sized `w` x `h`.
+    /// `rise` lifts the lock layer and `opacity` fades it during unlock.
+    fn draw(&self, w: u32, h: u32, rise: f32, opacity: f32) {
+        if opacity <= 0.0 {
+            return;
+        }
+        let scale = w as f32 / CANVAS.width;
+        let dy = rise * scale;
+        let centre = |tw: u32| (w as f32 - tw as f32) * 0.5;
+        let white = |a: f32| Color::rgba(1.0, 1.0, 1.0, a * opacity);
+        self.date.draw(
+            w,
+            h,
+            centre(self.date.width()),
+            70.0 * scale - dy,
+            white(0.88),
+        );
+        self.clock.draw(
+            w,
+            h,
+            centre(self.clock.width()),
+            104.0 * scale - dy,
+            white(0.93),
+        );
+        self.hint.draw(
+            w,
+            h,
+            centre(self.hint.width()),
+            h as f32 - self.hint.height() as f32 - 20.0 * scale - dy,
+            white(0.7),
+        );
+    }
+
+    fn destroy(self) {
+        self.clock.destroy();
+        self.date.destroy();
+        self.hint.destroy();
+    }
 }
 
 fn wall_from_name(name: &str) -> Option<Wall> {
@@ -64,6 +167,7 @@ fn wall_from_name(name: &str) -> Option<Wall> {
 struct App {
     options: Options,
     state: Option<(gl::GlWindowState, WallpaperRenderer, GlassRenderer, Overlay)>,
+    lock: Option<LockScreen>,
     util_gl: Option<sphatik_render::glow::Context>,
     wall: Wall,
     glass_on: bool,
@@ -76,6 +180,11 @@ struct App {
     started: Instant,
     touch: Option<TouchTracker>,
     cursor: Point,
+    unlock: Spring,
+    unlocking: bool,
+    animating: bool,
+    last_frame: Option<Instant>,
+    wallpaper_valid: bool,
     result: Result<(), String>,
 }
 
@@ -86,6 +195,7 @@ impl App {
         Self {
             options,
             state: None,
+            lock: None,
             util_gl: None,
             wall,
             glass_on: true,
@@ -98,6 +208,11 @@ impl App {
             started: Instant::now(),
             touch: None,
             cursor: Point::default(),
+            unlock: Spring::new(0.0, Preset::Smooth),
+            unlocking: false,
+            animating: false,
+            last_frame: None,
+            wallpaper_valid: false,
             result: Ok(()),
         }
     }
@@ -129,38 +244,74 @@ impl App {
         let (window_state, glow_ctx) = gl::create(event_loop, attributes)?;
         let glass = GlassRenderer::new(window_state.make_glow())?;
         let overlay = Overlay::new(window_state.make_glow())?;
+        self.lock = Some(LockScreen::new(&|| window_state.make_glow())?);
         self.util_gl = Some(window_state.make_glow());
         let wallpaper = WallpaperRenderer::new(glow_ctx)?;
         self.state = Some((window_state, wallpaper, glass, overlay));
+        self.unlock.jump_to(self.options.unlock.clamp(0.0, 1.0));
         self.render_frame()?;
         Ok(())
     }
 
     /// (Re)renders the wallpaper, and the glass panel over it, at the window
-    /// size (or the screenshot size).
+    /// size (or the screenshot size). The wallpaper is re-rendered unless
+    /// reused (during the unlock animation, to hold 60 fps over a cached
+    /// wallpaper).
     fn render_frame(&mut self) -> Result<(), Box<dyn Error>> {
+        self.render_frame_inner(false)
+    }
+
+    fn render_frame_inner(&mut self, reuse_wallpaper: bool) -> Result<(), Box<dyn Error>> {
         let glass_on = self.glass_on;
         let wall = self.wall;
         let (w, h) = self.target_size();
         let util = self.util_gl.as_ref();
+        // Unlock progress drives a translate-up and fade of the lock layer
+        // (reference section 8): translateY(-p * H * 0.55), opacity 1 - 1.5p.
+        let p = self.unlock.value();
+        let rise = p * 0.55 * CANVAS.height;
+        let opacity = (1.0 - 1.5 * p).clamp(0.0, 1.0);
         let mut glass_ms = None;
+        let need_wallpaper = !reuse_wallpaper || !self.wallpaper_valid;
         let Some((_, wallpaper, glass, _)) = self.state.as_mut() else {
             return Ok(());
         };
-        wallpaper.render(&wall.build(), CANVAS.width, CANVAS.height, w, h)?;
+        if need_wallpaper {
+            wallpaper.render(&wall.build(), CANVAS.width, CANVAS.height, w, h)?;
+            self.wallpaper_valid = true;
+        }
         if glass_on {
             let texture = wallpaper.texture().ok_or("no wallpaper texture")?;
-            let panels = [demo_panel()];
+            // The glass widget rides up with the lock layer and is dropped once
+            // the layer has mostly faded (the glass has no partial alpha).
+            let widget = [lock_panel(rise)];
+            let panels: &[GlassPanel] = if opacity > 0.25 { &widget } else { &[] };
             // Time the glass pass with a blocking finish (laptop-indicative;
             // the real budget is measured on the phone).
             if let Some(gl) = util {
                 finish(gl);
                 let start = Instant::now();
-                glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
+                glass.render(texture, CANVAS.width, CANVAS.height, w, h, panels)?;
                 finish(gl);
                 glass_ms = Some(start.elapsed().as_secs_f64() as f32 * 1000.0);
             } else {
-                glass.render(texture, CANVAS.width, CANVAS.height, w, h, &panels)?;
+                glass.render(texture, CANVAS.width, CANVAS.height, w, h, panels)?;
+            }
+            // Draw the lock-screen text onto the glass scene, so it shows in
+            // the window and in screenshots.
+            if let (Some(lock), Some(gl), Some(fbo)) =
+                (self.lock.as_mut(), util, glass.scene_framebuffer())
+            {
+                use sphatik_render::glow::HasContext;
+                lock.layout(w);
+                // SAFETY: the context is current; `fbo` is the live scene FBO.
+                unsafe {
+                    gl.bind_framebuffer(sphatik_render::glow::FRAMEBUFFER, Some(fbo));
+                    gl.viewport(0, 0, w as i32, h as i32);
+                }
+                lock.draw(w, h, rise, opacity);
+                // SAFETY: as above.
+                unsafe { gl.bind_framebuffer(sphatik_render::glow::FRAMEBUFFER, None) };
             }
         }
         self.glass_ms = glass_ms;
@@ -184,6 +335,25 @@ impl App {
     }
 
     fn redraw(&mut self) -> Result<(), Box<dyn Error>> {
+        // Advance the unlock spring, re-rendering over the cached wallpaper to
+        // hold 60 fps.
+        if self.animating {
+            let now = Instant::now();
+            let dt = self
+                .last_frame
+                .map_or(1.0 / 60.0, |t| now.duration_since(t).as_secs_f32());
+            self.last_frame = Some(now);
+            self.unlock.step(dt.min(0.034));
+            if self.unlock.is_at_rest() {
+                self.animating = false;
+                // Re-arm the demo: settling unlocked snaps back to locked.
+                if self.unlock.value() > 0.5 {
+                    self.unlock.jump_to(0.0);
+                }
+            }
+            let _ = self.render_frame_inner(true);
+        }
+
         let overlay_on = self.overlay_on;
         if !self.dirty && !overlay_on {
             return Ok(());
@@ -220,8 +390,9 @@ impl App {
             if glass_on { "on" } else { "off" },
             if overlay_on { "on" } else { "off" },
         ));
-        // Keep redrawing while the overlay is up, for a live graph.
-        if overlay_on {
+        // Keep redrawing while the overlay is up (live graph) or the unlock
+        // spring is still settling.
+        if overlay_on || self.animating {
             window_state.window.request_redraw();
         }
         Ok(())
@@ -279,35 +450,107 @@ impl App {
         }
     }
 
-    fn pointer(&mut self, pressed: Option<bool>) {
+    /// Asks the window to redraw, if there is one.
+    fn request_redraw(&self) {
+        if let Some((s, _, _, _)) = self.state.as_ref() {
+            s.window.request_redraw();
+        }
+    }
+
+    /// Feeds a mouse event to the swipe-up-to-unlock gesture. Returns true if
+    /// the window should redraw.
+    fn pointer(&mut self, pressed: Option<bool>) -> bool {
         let now = self.now_ms();
-        match (pressed, self.touch.as_mut()) {
-            (Some(true), _) => self.touch = Some(TouchTracker::begin(self.cursor, now)),
-            (None, Some(t)) => t.move_to(self.cursor, now),
-            (Some(false), Some(t)) => {
-                t.move_to(self.cursor, now);
-                let kind = if t.past_slop() {
-                    gesture::classify(
-                        &ShellContext::default(),
-                        CANVAS,
-                        t.start(),
-                        t.delta(),
-                        Hit::Other,
-                    )
-                } else {
-                    None
-                };
-                eprintln!(
-                    "touch: from ({:.0}, {:.0}) moved ({:.0}, {:.0}) -> {:?}",
-                    t.start().x,
-                    t.start().y,
-                    t.delta().x,
-                    t.delta().y,
-                    kind
-                );
-                self.touch = None;
+        match pressed {
+            Some(true) => {
+                // A press interrupts any settling spring and starts a drag.
+                self.animating = false;
+                self.unlocking = false;
+                self.touch = Some(TouchTracker::begin(self.cursor, now));
+                false
             }
-            _ => {}
+            None => {
+                let progress = {
+                    let Some(t) = self.touch.as_mut() else {
+                        return false;
+                    };
+                    t.move_to(self.cursor, now);
+                    if !self.unlocking
+                        && t.past_slop()
+                        && matches!(
+                            gesture::classify(
+                                &ShellContext::default(),
+                                CANVAS,
+                                t.start(),
+                                t.delta(),
+                                Hit::Other,
+                            ),
+                            Some(Gesture::Unlock)
+                        )
+                    {
+                        self.unlocking = true;
+                    }
+                    if self.unlocking {
+                        gesture::progress(Gesture::Unlock, CANVAS, t.delta(), 0.0).unwrap_or(0.0)
+                    } else {
+                        return false;
+                    }
+                };
+                self.unlock.jump_to(progress);
+                let _ = self.render_frame_inner(true);
+                true
+            }
+            Some(false) => {
+                let Some(mut t) = self.touch.take() else {
+                    return false;
+                };
+                t.move_to(self.cursor, now);
+                if !self.unlocking {
+                    // Log other gestures, as before, for feel-checking.
+                    if t.past_slop() {
+                        let kind = gesture::classify(
+                            &ShellContext::default(),
+                            CANVAS,
+                            t.start(),
+                            t.delta(),
+                            Hit::Other,
+                        );
+                        eprintln!(
+                            "touch: from ({:.0}, {:.0}) moved ({:.0}, {:.0}) -> {:?}",
+                            t.start().x,
+                            t.start().y,
+                            t.delta().x,
+                            t.delta().y,
+                            kind
+                        );
+                    }
+                    return false;
+                }
+                self.unlocking = false;
+                let lift = LiftOff {
+                    delta: t.delta(),
+                    velocity: t.velocity(),
+                    paused: t.is_paused(now),
+                    progress: gesture::progress(Gesture::Unlock, CANVAS, t.delta(), 0.0)
+                        .unwrap_or(0.0),
+                    has_recents: false,
+                    canvas: CANVAS,
+                };
+                if let gesture::Release::Spring {
+                    to,
+                    velocity,
+                    preset,
+                } = gesture::release(Gesture::Unlock, lift)
+                {
+                    self.unlock.set_config(preset);
+                    self.unlock.set_velocity(velocity);
+                    self.unlock.animate_to(to);
+                    self.animating = true;
+                    self.last_frame = None;
+                    return true;
+                }
+                false
+            }
         }
     }
 }
@@ -405,15 +648,20 @@ impl ApplicationHandler for App {
                         (position.y / per_point) as f32,
                     );
                 }
-                if self.touch.is_some() {
-                    self.pointer(None);
+                if self.touch.is_some() && self.pointer(None) {
+                    self.request_redraw();
                 }
             }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
                 ..
-            } => self.pointer(Some(state == ElementState::Pressed)),
+            } => {
+                let redraw = self.pointer(Some(state == ElementState::Pressed));
+                if redraw {
+                    self.request_redraw();
+                }
+            }
             _ => {}
         }
     }
@@ -465,6 +713,9 @@ fn main() -> ExitCode {
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("sphatik-preview: {e}");
         return ExitCode::FAILURE;
+    }
+    if let Some(lock) = app.lock.take() {
+        lock.destroy();
     }
     if let Some((s, wallpaper, glass, overlay)) = app.state.take() {
         overlay.destroy();
