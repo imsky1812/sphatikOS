@@ -5,7 +5,13 @@ is left. The authoritative per-work-package detail lives in
 [`CLAUDE.md`](../../CLAUDE.md) ("Current status"); this page is the high-level
 view. Update it at the end of every work package.
 
-**Last updated:** 2026-11-05 (WP 2.8 merged)
+**Last updated:** 2026-11-08 (Glass-on-laptop gate passed — Stage 2 complete)
+
+> **Device note (2026-11-08):** the owner now has a **Redmi 9A (`dandelion`)**
+> physically, but **curtana (Note 9 Pro) stays the design target** — the 9A's
+> PowerVR GPU has no open GLES driver on mainline, so the glass plan can't run
+> on it. This only affects Stage 3+ (on-device); Stages 1–2 are
+> platform-independent. See `device/xiaomi-curtana/STATUS.md`.
 
 ## Legend
 
@@ -34,10 +40,12 @@ Within the agreed scope (Stage 1: 1.1–1.3, Stage 2: 2.1–2.9) — **12 work
 packages**:
 
 - ✅ Complete: **all 12** (1.1, 1.2, 1.3, 2.1–2.9)
-- 🚩 Remaining gate: **Glass on laptop** (assemble the lock-screen mock-up)
+- ✅ Gate **Glass on laptop**: **PASSED** (PR #16) — lock-screen mock-up with
+  wallpaper, clock, glass widget and swipe-to-unlock at 60 fps in
+  `sphatik-preview`, plus a green headless golden.
 
-All scoped work packages are done; only the end-of-stage gate remains to close
-Stage 2.
+**The entire agreed scope is complete.** The next move is a new agreement with
+the owner (continue into Stage 3, or pause).
 
 Plus one side deliverable outside the build plan: the **interactive resume
 showcase**, deployed at <https://imsky1812.github.io/sphatikOS/> (PR #12).
@@ -65,9 +73,9 @@ outside the agreed laptop scope and do not gate the Stage 2 laptop work.
 
 ## Stage 2 — Graphics core on the laptop
 
-Gate: 🚩 **Glass on laptop** — a lock-screen mock-up (wallpaper + clock + one
-glass panel) at 60 fps in a window, with swipes that feel like the prototype,
-judged in `sphatik-preview` plus a green headless compositor test.
+Gate: ✅ **Glass on laptop** — **PASSED** (PR #16). A lock-screen mock-up
+(wallpaper + clock + one glass widget) at 60 fps in `sphatik-preview`, with
+swipe-up-to-unlock that feels like the prototype, plus a green headless golden.
 
 | WP | Deliverable | Status | Where |
 | --- | --- | --- | --- |
@@ -88,9 +96,12 @@ verified by an in-repo Wayland client test that maps a solid-colour toplevel and
 checks the captured frame, run headless under Xvfb in CI. Live dmabuf is
 deferred to the phone (Stage 3).
 
-**After 2.8:** assemble the **Glass on laptop** gate — compose wallpaper +
-clock + a glass panel into a lock-screen mock-up running at 60 fps in
-`sphatik-preview`.
+**Gate (done, PR #16):** the lock-screen mock-up in `sphatik-preview` — Aurora
+wallpaper + a large Outfit clock, date and unlock hint + one glass widget over
+the aurora; swipe up drives the lock layer up and fades it (shell gesture
+recogniser + spring engine), settling at 60 fps. Interim text via `ab_glyph` +
+bundled Outfit (the Stage 4 toolkit brings cosmic-text). Headless golden
+`render/tests/lockscreen.rs`.
 
 ---
 
@@ -112,10 +123,14 @@ predecessor's gate (gates are hard).
 
 ## What's left (near term)
 
-1. **Glass on laptop gate** — build the lock-screen mock-up (wallpaper + clock +
-   glass panel, 60 fps, prototype-feel swipes) in `sphatik-preview`, with a
-   green headless compositor test. This is the only thing left to close
-   Stage 2, now that all nine of its work packages are done.
+The entire agreed scope (Stage 1: 1.1–1.3, Stage 2: 2.1–2.9 + the Glass-on-laptop
+gate) is **done**. Nothing is in flight.
 
-After the gate, the next agreement with the owner decides whether to continue
-into Stage 3 (phone graphics) or pause.
+The next step is a fresh agreement with the owner:
+
+1. **Continue into Stage 3** (graphics on the phone) — gated on choosing a
+   viable on-device target. The Redmi 9A on hand can't run the mainline glass
+   pipeline (PowerVR, no open GLES driver); an Adreno/Freedreno device is the
+   realistic path. Write the device ADR before starting.
+2. **Or pause** — the laptop graphics core and the resume showcase stand on
+   their own.
