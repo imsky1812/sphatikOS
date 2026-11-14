@@ -2,7 +2,7 @@
 
 **स्फटिक (Sphatik), Sanskrit for crystal.** A phone operating system built from the ground up, with a liquid-glass interface, its own compositor and apps written in Rust, and support for Android apps through a compatibility container with microG.
 
-> Status: **pre-alpha, design and bring-up.** Nothing here runs on a phone yet. See the roadmap below.
+> Status: **pre-alpha.** The glass shell (wallpaper, lock screen and home mock-up) runs at a locked 60 fps on the desktop in a preview window — this milestone is done. Nothing runs on a phone yet. See the roadmap below.
 
 ## What makes it different
 
@@ -35,26 +35,44 @@ Redmi Note 9 Pro, India model (codename `curtana`, Snapdragon 720G, 4 GB RAM). B
 
 ## Quick start (developers)
 
+All desktop development runs through `sphatik-preview`, which hosts the renderer and shell in a window on Windows, macOS or Linux (see [ADR 0008](docs/adr/)).
+
 ```bash
-git clone https://github.com/<your-username>/sphatikOS && cd sphatikOS
-cargo run -p sphatik-comp -- --windowed   # compositor + shell in a window
+git clone https://github.com/imsky1812/sphatikOS && cd sphatikOS
+cargo run -p sphatik-preview        # wallpaper + glass shell in a window
 ```
+
+Swipe up (drag with the mouse) to unlock into the home screen; press `1`–`4` to switch wallpapers, `F12` for the debug overlay. The Linux-only Wayland compositor (`sphatik-comp`) is built and tested headless in CI and runs for real on the phone in Stage 3.
 
 Full setup: [docs/guides/dev-setup.md](docs/guides/dev-setup.md).
 
 ## Roadmap
 
-| Phase | Gate |
-| --- | --- |
-| 0. Toolchain and bring-up | Base image boots on curtana, hardware checklist recorded |
-| 1. Compositor on laptop | Glass shell at 60 fps in a window |
-| 2. Compositor on the phone | 60 fps full screen on curtana, touch working |
-| 3. Core shell and sphatikd | Lock, home, panels, Halo, notifications |
-| 4. Phone basics | A full week of daily use: calls, SMS, data, audio, camera |
-| 5. Stock apps and SDK | 16 apps, `.spk` packaging |
-| 6. Android layer and microG | WhatsApp works with notifications |
-| 7. Security, updates, own init | Signed A/B updates, encrypted storage |
-| 8. Public beta | All performance budgets met |
+| Phase | Gate | Status |
+| --- | --- | --- |
+| 0. Toolchain and workspace | Cargo workspace builds, CI green, `sp` tool skeleton | ✅ done |
+| 1. Compositor on laptop | Glass shell at 60 fps in a window | ✅ done |
+| 2. Compositor on the phone | 60 fps full screen on curtana, touch working | 🔲 in progress (device-blocked) |
+| 3. Core shell and sphatikd | Lock, home, panels, Halo, notifications | 🔲 |
+| 4. Phone basics | A full week of daily use: calls, SMS, data, audio, camera | 🔲 |
+| 5. Stock apps and SDK | 16 apps, `.spk` packaging | 🔲 |
+| 6. Android layer and microG | WhatsApp works with notifications | 🔲 |
+| 7. Security, updates, own init | Signed A/B updates, encrypted storage | 🔲 |
+| 8. Public beta | All performance budgets met | 🔲 |
+
+### Where it stands today
+
+**Built so far**
+- Design specification, engineering handbook and ADRs ([`docs/`](docs/))
+- Interactive shell prototype you can open in a browser ([`prototype/index.html`](prototype/index.html))
+- Rust workspace: compositor (Smithay), renderer, shell, UI toolkit, `sphatikd` and the `sp` build tool
+- The glass shell — wallpapers, lock screen and home mock-up — rendering at 60 fps in `sphatik-preview`
+- Device config for the Redmi Note 9 Pro ([`device/xiaomi-curtana/`](device/xiaomi-curtana/))
+
+**Not built yet**
+- Booting and running on the phone
+- Stock apps and the SDK
+- The Android compatibility layer
 
 ## Documentation
 
